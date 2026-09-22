@@ -1,8 +1,10 @@
-# Compiler & linker
-ASM           = nasm
-LIN           = ld
-CC            = gcc
-ISO			  = genisoimage
+OS := $(shell uname -s)
+
+# # Compiler & linker
+# ASM           = nasm
+# LIN           = ld
+# CC            = gcc
+# ISO			  = genisoimage
 
 # Directory
 SOURCE_FOLDER = src
@@ -13,9 +15,28 @@ ISO_NAME      = OSkm
 WARNING_CFLAG = -Wall -Wextra -Werror
 DEBUG_CFLAG   = -fshort-wchar -g
 STRIP_CFLAG   = -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -ffreestanding
-CFLAGS        = $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) -m32 -c -I$(SOURCE_FOLDER)
+ARCH_CFLAG    = -m32 -march=i386 -mno-sse -mno-sse2 -mno-mmx -msoft-float -mno-avx
 AFLAGS        = -f elf32 -g -F dwarf
 LFLAGS        = -T $(SOURCE_FOLDER)/linker.ld -melf_i386
+
+
+ifeq ($(OS),Darwin)
+	# macOS 
+	LLVM_PREFIX := $(shell brew --prefix llvm)
+	LLD_PREFIX  := $(shell brew --prefix lld 2>/dev/null || brew --prefix llvm)
+    ASM         := nasm
+    CC          := clang
+    LIN         := $(LLD_PREFIX)/bin/ld.lld
+    ISO         := mkisofs
+    CFLAGS      := --target=i386-elf $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) $(ARCH_CFLAG) -Wno-error=unused-command-line-argument -c -I$(SOURCE_FOLDER)
+else
+    # Linux / Windows (WSL)
+    ASM         := nasm
+    CC          := gcc
+    LIN         := ld
+    ISO         := $(shell which genisoimage 2>/dev/null || which mkisofs 2>/dev/null)
+    CFLAGS      := $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) $(ARCH_CFLAG) -c -I$(SOURCE_FOLDER)
+endif
 
 
 run: all
@@ -30,12 +51,13 @@ clean:
 
 
 kernel:
+	@mkdir -p $(OUTPUT_FOLDER)
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/kernel-entrypoint.s -o $(OUTPUT_FOLDER)/kernel-entrypoint.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/kernel.c -o $(OUTPUT_FOLDER)/kernel.o 
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/gdt.c -o $(OUTPUT_FOLDER)/gdt.o 
-	@$(LIN) $(LFLAGS) bin/*.o -o $(OUTPUT_FOLDER)/kernel
 	@echo Linking object files and generate elf32...
-	@rm -f *.o
+	@$(LIN) $(LFLAGS) $(OUTPUT_FOLDER)/*.o -o $(OUTPUT_FOLDER)/kernel
+	@rm -f $(OUTPUT_FOLDER)/*.o
 
 iso: kernel
 	@mkdir -p $(OUTPUT_FOLDER)/iso/boot/grub
