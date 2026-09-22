@@ -9,9 +9,29 @@
 #define FRAMEBUFFER_WIDTH 80
 #define FRAMEBUFFER_HEIGHT 25
 
-// void framebuffer_set_cursor(uint8_t r, uint8_t c) {
+void framebuffer_set_cursor(uint8_t r, uint8_t c) {
+    // 0x3D4 --> Index Register I/o Port
+    // 0x3D5 --> Data Register I/O Port
+    uint16_t pos = r * FRAMEBUFFER_WIDTH + c;
+    
+    // Enable Cursor
+    // Start Register
+    out(0x3D4, 0x0A);
+    out(0x3D5, (in(0x3D5) & 0xC0) | 14); // Change 14 to 0 if Want rectangle cursor
 
-// }
+    // End Register
+    out(0x3D4, 0x0B);
+    out(0x3D5, (in(0x3D5) & 0xE0) | 15);
+
+    // Cursor Positioning
+    // Cursor Location Low Byte
+    out(0x3D4, 0x0F);
+    out(0x3D5, (uint8_t) (pos & 0xFF));
+
+    // Cursor Location High Byte
+    out(0x3D4, 0x0E);
+    out(0x3D5, (uint8_t) ((pos >> 8) & 0xFF));
+}
 
 void framebuffer_write(uint8_t row, uint8_t col, char c, uint8_t fg, uint8_t bg) {
     //1 vga cel = 2B --> Multiply Index calculation by 2
