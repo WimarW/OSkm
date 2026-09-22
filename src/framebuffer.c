@@ -27,6 +27,7 @@ void framebuffer_write(uint8_t row, uint8_t col, char c, uint8_t fg, uint8_t bg)
 
 }
 
-// void framebuffer_clear(void) {
-//     // TODO : Implement
-// }
+void framebuffer_clear(void) {
+    size_t total_bytes = FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * 2;
+    memset(FRAMEBUFFER_MEMORY_OFFSET, 0x00, total_bytes);
+}
