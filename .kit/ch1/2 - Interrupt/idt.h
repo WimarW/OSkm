@@ -66,18 +66,6 @@ struct IDTR {
     uint32_t address;
 } __attribute__((packed));
 
-struct InterruptDescriptorTable {
-    struct IDTGate table[IDT_MAX_ENTRY_COUNT];
-} __attribute__((packed));
-
-extern struct InterruptDescriptorTable interrupt_descriptor_table;
-
-struct IDTR {
-    uint16_t size;
-    uint32_t address;
-} __attribute__((packed));
-
-
 
 /**
  * Set IDTGate with proper interrupt handler values.
