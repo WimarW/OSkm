@@ -5,9 +5,7 @@
 #include "header/stdlib/string.h"
 #include "header/cpu/portio.h"
 
-// Resolusi 80x25
-#define FRAMEBUFFER_WIDTH 80
-#define FRAMEBUFFER_HEIGHT 25
+
 
 void framebuffer_set_cursor(uint8_t r, uint8_t c) {
     // 0x3D4 --> Index Register I/o Port
