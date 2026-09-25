@@ -199,13 +199,29 @@ void keyboard_configuration(){
                     }
                 }
             } else {
+                // Jika kursor tidak berada di akhir baris (row_lengths[row]),
+                // geser semua karakter di kanan kursor satu posisi ke kanan dulu
+                if (col < row_lengths[row]) {
+                    int shift_limit = row_lengths[row];
+                    if (shift_limit >= FRAMEBUFFER_WIDTH) {
+                        shift_limit = FRAMEBUFFER_WIDTH - 1;
+                    }
+                    for (int c_idx = shift_limit; c_idx > col; c_idx--) {
+                        char prev_c = framebuffer_read(row, c_idx - 1);
+                        framebuffer_write(row, c_idx, prev_c, 0xF, 0);
+                    }
+                    if (row_lengths[row] < FRAMEBUFFER_WIDTH) {
+                        row_lengths[row]++;
+                    }
+                }
+
                 framebuffer_write(row, col, c, 0xF, 0);
                 col++;
-                
+
                 if (col > row_lengths[row]) {
                     row_lengths[row] = col;
                 }
-                
+
                 if (col >= FRAMEBUFFER_WIDTH) {
                     if (row < FRAMEBUFFER_HEIGHT - 1) {
                         col = 0;
