@@ -49,3 +49,10 @@ void framebuffer_clear(void) {
     size_t total_bytes = FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * 2;
     memset(FRAMEBUFFER_MEMORY_OFFSET, 0x00, total_bytes);
 }
+
+char framebuffer_read(uint8_t row, uint8_t col) {
+    uint16_t index = (row * FRAMEBUFFER_WIDTH + col) * 2;
+    uint8_t *fb = (uint8_t *) FRAMEBUFFER_MEMORY_OFFSET;
+    
+    return fb[index];
+}
