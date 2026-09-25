@@ -199,8 +199,6 @@ void keyboard_configuration(){
                     }
                 }
             } else {
-                // Jika kursor tidak berada di akhir baris (row_lengths[row]),
-                // geser semua karakter di kanan kursor satu posisi ke kanan dulu
                 if (col < row_lengths[row]) {
                     int shift_limit = row_lengths[row];
                     if (shift_limit >= FRAMEBUFFER_WIDTH) {
