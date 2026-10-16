@@ -6,6 +6,7 @@
 #include "header/kernel-entrypoint.h"
 #include "header/text/framebuffer.h"
 #include "header/driver/keyboard.h"
+#include "header/driver/disk.h"
 
 void kernel_setup(void) {
     load_gdt(&_gdt_gdtr);
@@ -16,7 +17,13 @@ void kernel_setup(void) {
     framebuffer_set_cursor(0, 0);
     keyboard_state_activate();
     
+    struct BlockBuffer b;
+    for (int i = 0; i < 512; i++) b.buf[i] = i % 16;
+    write_blocks(&b, 17, 1);
+
     keyboard_configuration();
+
+
 
 
     __asm__("int $0x4");
