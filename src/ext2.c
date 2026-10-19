@@ -216,3 +216,44 @@ void create_ext2(void) {
 
     write_blocks(fs_signature, BOOT_SECTOR, 1);
 }
+
+
+void deallocate_node (uint32_t inode){
+    if (inode == 0 || inode > sb.s_inodes_count) return;
+    
+    uint32_t g     = inode_to_bgd(inode);
+    uint32_t local = inode_to_local(inode);
+    uint32_t block = bgd_table.table[g].bg_inode_table + local / INODES_PER_TABLE;
+    uint32_t index = local % INODES_PER_TABLE;
+
+    struct EXT2Inode node;
+    struct BlockBuffer b;
+    read_blocks(&b, block, 1);
+    // Copies Inode information to node var.
+    memcpy(&node, (b.buf + index * INODE_SIZE), INODE_SIZE);
+
+    // Deallocates Memory blocks
+    if (node.i_blocks > 0) deallocate_blocks(node.i_blocks, node.i_block);
+
+    if ((node.i_mode & EXT2_S_IFDIR) != 0 && bgd_table.table[g].bg_used_dirs_count > 0) {
+        bgd_table.table[g].bg_used_dirs_count--;
+    }
+
+
+    struct BlockBuffer bitmap;
+    read_blocks(&bitmap, bgd_table.table[g].bg_inode_bitmap, 1);
+
+    // Constructs a mask where everything but the allocation bit is 1, so if local % 8 == 2
+    // ~ (00000100) --> (11111011)
+    // The mask is used to change the inode's allocation bit to 0
+    bitmap.buf[local / 8] &= (uint8_t)~(1u << (local % 8));
+    write_blocks(&bitmap, bgd_table.table[g].bg_inode_bitmap, 1);
+
+    // zeroes out inode data on disk
+    memset(&node, 0, sizeof(struct EXT2Inode));
+    sync_node(&node, inode);
+
+    bgd_table.table[g].bg_free_inodes_count++;
+    sb.s_free_inodes_count++;
+    sync_metadata();
+}
