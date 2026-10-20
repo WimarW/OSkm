@@ -581,5 +581,206 @@ int8_t delete(struct EXT2DriverRequest request){
     return 0;
 }
 
+static bool load_inode(uint32_t inode_number, struct EXT2Inode *result) {
+    // MENERIMA NOMOR INODE DAN POINTER KE RAM TEMPAT NYIMPAN
+    // CEK APAKAH OUT OF RANGE
+    if (result == NULL || inode_number == 0 ||
+        inode_number > GROUPS_COUNT * INODES_PER_GROUP)
+        return false;
 
+    // MENENTUKAN BLOCK GROUP (112 INODES PER GROUP)
+    uint32_t group = inode_to_bgd(inode_number);
+    uint32_t local = inode_to_local(inode_number);
 
+    // AMBIL DATA BGD
+    struct EXT2BlockGroupDescriptor *bgd = &bgd_table.table[group];
+
+    
+    if (bgd->bg_inode_bitmap == 0 ||
+        bgd->bg_inode_bitmap >= DISK_SPACE / BLOCK_SIZE)
+        return false;
+
+    // MENGECEK APAKAH BITMAP DIGUNAKAN
+    struct BlockBuffer bitmap;
+    read_blocks(&bitmap, bgd->bg_inode_bitmap, 1);
+    if ((bitmap.buf[local / 8u] & (1u << (local % 8u))) == 0)
+        return false;
+
+    // CARI TEMPAT INODE DISIMPAN
+    uint32_t table_block = bgd->bg_inode_table + local / INODES_PER_TABLE;
+    if (table_block == 0 || table_block >= DISK_SPACE / BLOCK_SIZE)
+        return false;
+
+    // TENTUUKAN OFFSET
+    struct BlockBuffer block;
+    read_blocks(&block, table_block, 1);
+    uint32_t offset = (local % INODES_PER_TABLE) * INODE_SIZE;
+    memcpy(result, block.buf + offset, sizeof(*result));
+    return true;
+}
+
+static uint32_t read_indirect_pointer(uint32_t block_number, uint32_t index) {
+    const uint32_t pointers_per_block = BLOCK_SIZE / sizeof(uint32_t);
+    if (block_number == 0 || block_number >= DISK_SPACE / BLOCK_SIZE ||
+        index >= pointers_per_block)
+        return 0;
+
+    struct BlockBuffer block;
+    uint32_t pointer;
+    read_blocks(&block, block_number, 1);
+    memcpy(&pointer, block.buf + index * sizeof(pointer), sizeof(pointer));
+    return pointer;
+}
+
+static uint32_t inode_data_block(const struct EXT2Inode *inode, uint32_t index) {
+    const uint32_t N = BLOCK_SIZE / sizeof(uint32_t);
+    if (index < 12u)
+        return inode->i_block[index];
+
+    index -= 12u;
+    if (index < N)
+        return read_indirect_pointer(inode->i_block[12], index);
+
+    index -= N;
+    if (index < N * N) {
+        uint32_t indirect = read_indirect_pointer(inode->i_block[13], index / N);
+        return read_indirect_pointer(indirect, index % N);
+    }
+
+    index -= N * N;
+    if (index < N * N * N) {
+        uint32_t double_indirect = read_indirect_pointer(
+            inode->i_block[14], index / (N * N));
+        uint32_t indirect = read_indirect_pointer(
+            double_indirect, (index / N) % N);
+        return read_indirect_pointer(indirect, index % N);
+    }
+
+    return 0;
+}
+
+static int8_t find_child_inode(
+    uint32_t parent_inode,
+    const char *name,
+    uint8_t name_len,
+    bool want_directory,
+    struct EXT2Inode *result
+) {
+    if (name == NULL || name_len == 0 || result == NULL)
+        return -1;
+
+    struct EXT2Inode parent;
+    if (!load_inode(parent_inode, &parent) ||
+        (parent.i_mode & 0xF000u) != EXT2_S_IFDIR)
+        return 3;
+
+    if (parent.i_size == 0 || parent.i_size > DISK_SPACE)
+        return 3;
+
+    bool found_other_type = false;
+    uint32_t dir_block_count = (parent.i_size + BLOCK_SIZE - 1u) / BLOCK_SIZE;
+
+    for (uint32_t i = 0; i < dir_block_count; i++) {
+        uint32_t disk_block = inode_data_block(&parent, i);
+        if (disk_block == 0 || disk_block >= DISK_SPACE / BLOCK_SIZE)
+            return 3;
+
+        struct BlockBuffer entries;
+        read_blocks(&entries, disk_block, 1);
+
+        uint32_t start = i * BLOCK_SIZE;
+        uint32_t bytes_in_block = parent.i_size - start;
+        if (bytes_in_block > BLOCK_SIZE)
+            bytes_in_block = BLOCK_SIZE;
+
+        uint32_t offset = 0;
+        while (offset + sizeof(struct EXT2DirectoryEntry) <= bytes_in_block) {
+            struct EXT2DirectoryEntry *entry =
+                (struct EXT2DirectoryEntry *)(entries.buf + offset);
+
+            if (entry->rec_len < sizeof(*entry) ||
+                (entry->rec_len & 3u) != 0 ||
+                entry->rec_len > bytes_in_block - offset ||
+                entry->name_len > entry->rec_len - sizeof(*entry))
+                return -1;
+
+            if (entry->inode != 0 && entry->name_len == name_len &&
+                memcmp(get_entry_name(entry), name, name_len) == 0) {
+                bool is_directory = entry->file_type == EXT2_FT_DIR;
+                bool is_file = entry->file_type == EXT2_FT_REG_FILE;
+                bool type_matches = want_directory ? is_directory : is_file;
+
+                if (!type_matches) {
+                    found_other_type = true;
+                } else {
+                    if (!load_inode(entry->inode, result))
+                        return -1;
+                    uint16_t expected_mode =
+                        want_directory ? EXT2_S_IFDIR : EXT2_S_IFREG;
+                    if ((result->i_mode & 0xF000u) != expected_mode)
+                        return -1;
+                    return 0;
+                }
+            }
+
+            offset += entry->rec_len;
+        }
+    }
+
+    return found_other_type ? 1 : 2;
+}
+
+int8_t read(struct EXT2DriverRequest request) {
+    struct EXT2Inode file;
+    int8_t result = find_child_inode(
+        request.parent_inode, request.name, request.name_len,
+        false, &file
+    );
+
+    if (result == 3) return 4;
+    if (result == 2) return 3;
+    if (result != 0) return result;
+
+    if (request.buffer_size < file.i_size)
+        return 2;
+    if (file.i_size != 0 && request.buf == NULL)
+        return -1;
+    if (file.i_size > DISK_SPACE)
+        return -1;
+
+    uint32_t block_count = (file.i_size + BLOCK_SIZE - 1u) / BLOCK_SIZE;
+    for (uint32_t i = 0; i < block_count; i++) {
+        uint32_t disk_block = inode_data_block(&file, i);
+        if (disk_block == 0 || disk_block >= DISK_SPACE / BLOCK_SIZE)
+            return -1;
+
+        struct BlockBuffer block;
+        read_blocks(&block, disk_block, 1);
+
+        uint32_t remaining = file.i_size - i * BLOCK_SIZE;
+        uint32_t bytes_to_copy = remaining < BLOCK_SIZE ? remaining : BLOCK_SIZE;
+        memcpy((uint8_t *)request.buf + i * BLOCK_SIZE,
+               block.buf, bytes_to_copy);
+    }
+    return 0;
+}
+
+int8_t read_directory(struct EXT2DriverRequest *prequest) {
+    if (prequest == NULL)
+        return -1;
+
+    struct EXT2Inode directory;
+    int8_t result = find_child_inode(
+        prequest->parent_inode, prequest->name,
+        prequest->name_len, true, &directory
+    );
+
+    if (result != 0)
+        return result;
+
+    if (prequest->buf == NULL || prequest->buffer_size < sizeof(directory))
+        return -1;
+
+    memcpy(prequest->buf, &directory, sizeof(directory));
+    return 0;
+}
