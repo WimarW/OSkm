@@ -18,7 +18,7 @@ STRIP_CFLAG   = -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodef
 ARCH_CFLAG    = -m32 -march=i386 -mno-sse -mno-sse2 -mno-mmx -msoft-float -mno-avx
 AFLAGS        = -f elf32 -g -F dwarf
 LFLAGS        = -T $(SOURCE_FOLDER)/linker.ld -melf_i386
-DISK_NAME      = storage
+DISK_NAME      = sample-image
 
 
 
