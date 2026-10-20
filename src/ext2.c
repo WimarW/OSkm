@@ -233,7 +233,7 @@ void deallocate_node (uint32_t inode){
     memcpy(&node, (b.buf + index * INODE_SIZE), INODE_SIZE);
 
     // Deallocates Memory blocks
-    if (node.i_blocks > 0) deallocate_blocks(node.i_blocks, node.i_block);
+    if (node.i_blocks > 0) deallocate_blocks(node.i_block, node.i_blocks);
 
     if ((node.i_mode & EXT2_S_IFDIR) != 0 && bgd_table.table[g].bg_used_dirs_count > 0) {
         bgd_table.table[g].bg_used_dirs_count--;
@@ -256,4 +256,81 @@ void deallocate_node (uint32_t inode){
     bgd_table.table[g].bg_free_inodes_count++;
     sb.s_free_inodes_count++;
     sync_metadata();
+}
+
+int8_t delete(struct EXT2DriverRequest request){
+
+    if (request.name == NULL || request.name_len == 0) {
+        return -1; // Invalid request
+    }
+
+    if (request.parent_inode == 0 || request.parent_inode > sb.s_inodes_count) {
+        return 3; // Parent Folder invalid
+    }
+
+    
+
+    uint32_t g     = inode_to_bgd(request.parent_inode);
+    uint32_t local = inode_to_local(request.parent_inode);
+    uint32_t block = bgd_table.table[g].bg_inode_table + local / INODES_PER_TABLE;
+    uint32_t index = local % INODES_PER_TABLE;
+    struct EXT2Inode parent;
+    struct BlockBuffer b;
+    read_blocks(&b, block, 1);
+    // Copies Inode information to node var.
+    memcpy(&parent, (b.buf + index * INODE_SIZE), INODE_SIZE);
+
+    if ((parent.i_mode & EXT2_S_IFDIR) == 0 || parent.i_block[0] == 0) {
+        return 3; // Parent folder invalid
+    }
+
+    struct BlockBuffer dir_buf;
+    read_blocks(&dir_buf, parent.i_block[0], 1);
+
+    struct EXT2DirectoryEntry *prev = NULL;
+    struct EXT2DirectoryEntry *curr = (struct EXT2DirectoryEntry *)dir_buf.buf;
+    uint32_t offset = 0;
+    bool found = false;
+
+    // Find target to be deleted
+    while (offset < BLOCK_SIZE && curr->rec_len != 0) {
+        if (curr->inode != 0 && curr->name_len == request.name_len &&
+            memcmp(get_entry_name(curr), request.name, request.name_len) == 0) {
+            bool entry_is_dir = (curr->file_type == EXT2_FT_DIR);
+            if (entry_is_dir == request.is_directory) {
+                found = true;
+                break;
+            }
+        }
+        offset += curr->rec_len;
+        prev = curr;
+        curr = get_next_directory_entry(curr);
+    }
+
+    if (!found) return 1;
+    uint32_t target_inode = curr->inode;
+    if(target_inode == 0 || target_inode > sb.s_inodes_count) return 1;
+
+    struct EXT2Inode target;
+    g = inode_to_bgd(target_inode);
+    local = inode_to_local(target_inode);
+    block = bgd_table.table[g].bg_inode_table + local / INODES_PER_TABLE;
+    index = local % INODES_PER_TABLE;
+    
+    read_blocks(&b, block, 1);
+    memcpy(&target, (b.buf + index * INODE_SIZE), INODE_SIZE);
+
+    if ((target.i_mode & EXT2_S_IFDIR) && !is_directory_empty(target_inode)) return 2; // directory not empty
+
+    uint16_t freed_len = curr->rec_len;
+    curr->inode = 0;
+    if (prev != NULL) prev->rec_len += freed_len;
+    write_blocks(&dir_buf, parent.i_block[0], 1);
+    deallocate_node(curr->inode);
+
+    return 0;
+}
+
+int8_t write(struct EXT2DriverRequest *request){
+    
 }
