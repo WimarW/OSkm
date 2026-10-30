@@ -743,8 +743,8 @@ int8_t read(struct EXT2DriverRequest request) {
 
     if (request.buffer_size < file.i_size)
         return 2;
-    if (file.i_size != 0 && request.buf == NULL)
-        return -1;
+    // if (file.i_size != 0 && request.buf == NULL)
+    //     return -1;
     if (file.i_size > DISK_SPACE)
         return -1;
 

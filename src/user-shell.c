@@ -1,4 +1,5 @@
 #include <stdint.h>
+<<<<<<< HEAD
 #include "header/filesystem/ext2.h"
 
 #define BLOCK_COUNT 16
@@ -712,5 +713,10 @@ int main(void) {
         eval_line(input_line);
     }
 
+=======
+
+int main(void) {
+    __asm__ volatile("mov %0, %%eax" : /* <Empty> */ : "r"(0xDEADBEEF));
+>>>>>>> main
     return 0;
 }

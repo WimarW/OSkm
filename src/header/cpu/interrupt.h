@@ -125,6 +125,14 @@ struct InterruptFrame {
     struct InterruptStack int_stack;
 } __attribute__((packed));
 
+extern struct TSSEntry _interrupt_tss_entry;
+struct TSSEntry {
+    uint32_t prev_tss; // Previous TSS 
+    uint32_t esp0;     // Stack pointer to load when changing to kernel mode
+    uint32_t ss0;      // Stack segment to load when changing to kernel mode
+    // Unused variables
+    uint32_t unused_register[23];
+} __attribute__((packed));
 
 
 // Activate PIC mask for keyboard only
@@ -153,5 +161,8 @@ void pic_remap(void);
  * @param frame Information about CPU during interrupt is raised
  */
 void main_interrupt_handler(struct InterruptFrame frame);
+
+void set_tss_kernel_current_stack(void);
+
 
 #endif
