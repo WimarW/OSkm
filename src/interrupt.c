@@ -2,6 +2,7 @@
 #include "header/cpu/portio.h"
 #include "header/cpu/gdt.h"
 #include "header/driver/keyboard.h"
+#include "header/memory/swap.h"
 
 void io_wait(void)
 {
@@ -45,6 +46,9 @@ void main_interrupt_handler(struct InterruptFrame frame)
 {
     switch (frame.int_number)
     {
+    case 14:
+        handle_page_fault(frame.int_stack.error_code);
+        break;
     case PIC1_OFFSET + IRQ_KEYBOARD:
         keyboard_isr();
         break;

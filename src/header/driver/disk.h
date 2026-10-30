@@ -47,4 +47,8 @@ void read_blocks(void *ptr, uint32_t logical_block_address, uint8_t block_count)
  */
 void write_blocks(const void *ptr, uint32_t logical_block_address, uint8_t block_count);
 
+void read_blocks_drive(void *ptr, uint32_t logical_block_address, uint8_t block_count, uint8_t drive);
+
+void write_blocks_drive(const void *ptr, uint32_t logical_block_address, uint8_t block_count, uint8_t drive);
+
 #endif

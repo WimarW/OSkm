@@ -10,6 +10,10 @@
 #include "header/driver/disk.h"
 #include "header/filesystem/ext2.h"
 #include "header/memory/paging.h"
+<<<<<<< HEAD
+=======
+#include "header/memory/swap.h"
+>>>>>>> bee075ee230fcedb86cbaf7a543368651a341cee
 
 void test_ext2_integration(void) {
     // 1. Read test
@@ -83,6 +87,7 @@ void kernel_setup(void) {
     activate_keyboard_interrupt();
     framebuffer_clear();
     framebuffer_set_cursor(0, 0);
+<<<<<<< HEAD
     // keyboard_state_activate();
     // keyboard_configuration();
     initialize_filesystem_ext2();
@@ -107,6 +112,11 @@ void kernel_setup(void) {
     // Set TSS $esp pointer and jump into shell
     set_tss_kernel_current_stack();
     kernel_execute_user_program((uint8_t*) 0);
+=======
+    keyboard_state_activate();
+
+    keyboard_configuration();
+>>>>>>> bee075ee230fcedb86cbaf7a543368651a341cee
 
     while (true);
 }

@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include "header/stdlib/string.h"
 #include "header/memory/paging.h"
+#include "header/memory/swap.h"
 
 /*
  * Tabel awal milik kernel. Pada 3.1.2–3.1.3, assembly loader akan
@@ -137,7 +138,7 @@ bool paging_allocate_user_page_frame(struct PageDirectory *page_dir, void *virtu
 
     /* Membuat Page Table baru juga butuh satu frame fisik tambahan. */
     uint32_t frames_needed = page_table_exists ? 1u : 2u;
-    if (page_manager_state.free_page_frame_count < frames_needed) {
+    if (!swap_ensure_free_frames(frames_needed)) {
         return false;
     }
 
@@ -166,6 +167,26 @@ bool paging_allocate_user_page_frame(struct PageDirectory *page_dir, void *virtu
     return true;
 }
 
+static void paging_release_table_if_empty(
+    struct PageDirectory *page_dir, uint32_t directory_index, struct PageTable *page_table
+) {
+    for (uint32_t i = 0; i < PAGE_ENTRY_COUNT; ++i) {
+        if (page_table->table[i].flag.present_bit || page_table->table[i].ignored) return;
+    }
+    uint32_t table_frame = page_dir->table[directory_index].page_table_base_address;
+    if (table_frame >= KERNEL_RESERVED_PAGE_FRAME_COUNT &&
+        table_frame < PAGE_FRAME_ALLOCATABLE_END &&
+        page_manager_state.page_frame_map[table_frame]) {
+        page_dir->table[directory_index] = (struct PageDirectoryEntry) {0};
+        void *recursive_addr = (void *)(uintptr_t)(
+            RECURSIVE_PAGE_TABLES_VIRTUAL_ADDRESS + directory_index * PAGE_FRAME_SIZE
+        );
+        flush_single_tlb(recursive_addr);
+        page_manager_state.page_frame_map[table_frame] = false;
+        ++page_manager_state.free_page_frame_count;
+    }
+}
+
 /* Lepas satu virtual page user, kembalikan frame ke daftar frame kosong. */
 bool paging_free_user_page_frame(struct PageDirectory *page_dir, void *virtual_addr) {
     if (!paging_valid_user_request(page_dir, virtual_addr)) {
@@ -180,8 +201,20 @@ bool paging_free_user_page_frame(struct PageDirectory *page_dir, void *virtual_a
     }
 
     struct PageTable *page_table = paging_get_page_table(page_dir, directory_index);
-    if (page_table == NULL || !page_table->table[table_index].flag.present_bit) {
-        return false; /* Virtual page belum dialokasikan */
+    if (page_table == NULL) {
+        return false;
+    }
+
+    volatile struct PageTableEntry *entry = &page_table->table[table_index];
+    if (!entry->flag.present_bit) {
+        if (entry->ignored != SWAP_PTE_MARKER) {
+            return false; /* Virtual page belum dialokasikan */
+        }
+        swap_release_slot(entry->physical_page_base_address);
+        page_table->table[table_index] = (struct PageTableEntry) {0};
+        flush_single_tlb(virtual_addr);
+        paging_release_table_if_empty(page_dir, directory_index, page_table);
+        return true;
     }
 
     uint32_t frame_index = page_table->table[table_index].physical_page_base_address;
@@ -197,25 +230,6 @@ bool paging_free_user_page_frame(struct PageDirectory *page_dir, void *virtual_a
     page_manager_state.page_frame_map[frame_index] = false;
     ++page_manager_state.free_page_frame_count;
 
-    /* Jika Page Table sudah kosong, bebaskan juga frame milik tabel tersebut. */
-    for (uint32_t i = 0; i < PAGE_ENTRY_COUNT; ++i) {
-        if (page_table->table[i].flag.present_bit) {
-            return true;
-        }
-    }
-
-    uint32_t table_frame = page_dir->table[directory_index].page_table_base_address;
-    if (table_frame >= KERNEL_RESERVED_PAGE_FRAME_COUNT &&
-        table_frame < PAGE_FRAME_ALLOCATABLE_END &&
-        page_manager_state.page_frame_map[table_frame]) {
-        page_dir->table[directory_index] = (struct PageDirectoryEntry) {0};
-        /* PDE yang hilang juga mengubah mapping recursive Page Table. */
-        void *recursive_addr = (void *)(uintptr_t)(
-            RECURSIVE_PAGE_TABLES_VIRTUAL_ADDRESS + directory_index * PAGE_FRAME_SIZE
-        );
-        flush_single_tlb(recursive_addr);
-        page_manager_state.page_frame_map[table_frame] = false;
-        ++page_manager_state.free_page_frame_count;
-    }
+    paging_release_table_if_empty(page_dir, directory_index, page_table);
     return true;
 }
