@@ -258,14 +258,14 @@ int cd_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
     (void)stdout_buf;
     (void)max_out;
 
-    if (strcmp(argv[1], ".") == 0) return 0;
-
     // Goes to root if no args or arg is '/'
     if (argc < 2 || strcmp(argv[1], "/") == 0) {
         current_inode = ROOT_INODE;
         strcpy(current_directory_path, "/");
         return 0;
     }
+
+    if (strcmp(argv[1], ".") == 0) return 0;
 
     //Goes to parent directory
     if (strcmp(argv[1], "..") == 0) {
@@ -412,15 +412,15 @@ int rm_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
     (void) stdin_buf;
     size_t offset = 0;
 
-    if (strcmp(argv[1], ".") == 0 || strcmp(argv[1], "..") == 0) {
-        buf_append(stdout_buf, &offset, max_out, "rm: cannot remove '.' or '..'\n");
-        return -1;
-    }
     if (argc < 2) {
         buf_append(stdout_buf, &offset, max_out, "rm: missing operand\n");
         return -1;
     }
 
+    if (strcmp(argv[1], ".") == 0 || strcmp(argv[1], "..") == 0) {
+        buf_append(stdout_buf, &offset, max_out, "rm: cannot remove '.' or '..'\n");
+        return -1;
+    }
 
     uint32_t target_inode = 0;
     uint8_t file_type = 0;
