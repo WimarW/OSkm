@@ -15,7 +15,7 @@ ISO_NAME      = OSkm
 # Flags
 WARNING_CFLAG = -Wall -Wextra -Werror
 DEBUG_CFLAG   = -fshort-wchar -g
-STRIP_CFLAG   = -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -ffreestanding
+STRIP_CFLAG   = -nostdlib -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -ffreestanding -fno-delete-null-pointer-checks
 ARCH_CFLAG    = -m32 -march=i386 -mno-sse -mno-sse2 -mno-mmx -msoft-float -mno-avx
 AFLAGS        = -f elf32 -g -F dwarf
 LFLAGS        = -T $(SOURCE_FOLDER)/linker.ld -melf_i386
@@ -29,6 +29,7 @@ ifeq ($(OS),Darwin)
     LIN         := $(LLD_PREFIX)/bin/ld.lld
     ISO         := mkisofs
     CFLAGS      := --target=i386-elf $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) $(ARCH_CFLAG) -Wno-error=unused-command-line-argument -c -I$(SOURCE_FOLDER)
+	INSERTER_FLAGS := -g
 else
     # Linux / Windows (WSL)
     ASM         := nasm
@@ -36,6 +37,7 @@ else
     LIN         := ld
     ISO         := $(shell which genisoimage 2>/dev/null || which mkisofs 2>/dev/null)
     CFLAGS      := $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) $(ARCH_CFLAG) -c -I$(SOURCE_FOLDER)
+	    INSERTER_FLAGS := -g -Wno-builtin-declaration-mismatch
 endif
 
 run: all
@@ -53,6 +55,27 @@ clean:
 
 disk:
 	@qemu-img create -f raw $(OUTPUT_FOLDER)/$(DISK_NAME).bin 4M
+
+inserter:
+	@mkdir -p $(OUTPUT_FOLDER)
+	@$(CC) $(INSERTER_FLAGS) -I$(SOURCE_FOLDER) \
+		$(SOURCE_FOLDER)/stdlib/string.c \
+		$(SOURCE_FOLDER)/ext2.c \
+		$(SOURCE_FOLDER)/external-inserter.c \
+		-o $(OUTPUT_FOLDER)/inserter
+
+user-shell:
+	@mkdir -p $(OUTPUT_FOLDER)
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC) $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/user-shell.c -o user-shell.o
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o user-shell.o -o $(OUTPUT_FOLDER)/shell
+	@echo Linking object shell object files and generate flat binary...
+	@rm -f *.o
+
+insert-shell: inserter user-shell
+	@echo Inserting shell into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter shell 1 $(DISK_NAME).bin
 
 kernel:
 	@mkdir -p $(OUTPUT_FOLDER)
