@@ -489,13 +489,32 @@ int rm_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
 }
 
 int mv_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
-    int res = cp_cmd(argc, argv, stdin_buf, stdout_buf, max_out);
-    if (res == 0) {
-        fs_delete(current_inode, argv[1], false);
+    size_t offset = 0;
+    if (argc < 3) {
+        buf_append(stdout_buf, &offset, max_out, "mv: missing operand (mv <src> <dst>)\n");
+        return -1;
     }
-    return res;
-}
 
+    uint32_t src_inode; uint8_t src_type;
+    if (!lookup_entry(current_inode, argv[1], &src_inode, &src_type)) {
+        buf_append(stdout_buf, &offset, max_out, "mv: source not found\n");
+        return -1;
+    }
+    if (src_type == EXT2_FT_DIR) {
+        buf_append(stdout_buf, &offset, max_out, "mv: moving directories is not supported\n");
+        return -1;
+    }
+
+    int res = cp_cmd(argc, argv, stdin_buf, stdout_buf, max_out);
+    if (res != 0) return res;
+
+    if (fs_delete(current_inode, argv[1], false) != 0) {
+        size_t off2 = 0;
+        buf_append(stdout_buf, &off2, max_out, "mv: copied but failed to remove source\n");
+        return -1;
+    }
+    return 0;
+}
 static void recursive_find(uint32_t inode, const char *path_prefix, const char *target, char *stdout_buf, size_t *offset, size_t max_out) {
     uint8_t local_buf[BUFFER_SIZE];
     if (fs_read_directory(inode, local_buf, sizeof(local_buf)) != 0) return;
