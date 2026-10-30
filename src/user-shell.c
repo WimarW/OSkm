@@ -102,6 +102,10 @@ char sys_getc(void){
     return c;
 }
 
+void sys_clear_screen(void) {
+    syscall(8, 0, 0, 0);
+}
+
 int8_t fs_read(uint32_t parent_inode, char *name, void *buf, uint32_t size){
     int32_t retcode = -1;
     struct EXT2DriverRequest request = {
@@ -171,6 +175,7 @@ int8_t fs_delete(uint32_t parent_inode, char *name, bool is_dir){
     syscall(3, (uint32_t)&request, (uint32_t)&retcode, 0);
     return (int8_t)retcode;
 }
+
 
 // State and Buffer Management Functions
 static char current_directory_path[MAX_PATH_LEN] = "/";
@@ -504,6 +509,16 @@ int pwd_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, siz
     return 0;
 }
 
+int clear_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out){
+    (void)argc;
+    (void)argv;
+    (void)stdin_buf;
+    (void)stdout_buf;
+    (void)max_out;
+    sys_clear_screen();
+    return 0;
+}
+
 int grep_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
     size_t off = 0;
     bool use_regex = false;
@@ -580,6 +595,8 @@ struct command_entry {
 static const struct command_entry COMMAND_TABLE[] = {
     {"cd",    cd_cmd},
     {"ls",    ls_cmd},
+    {"pwd",   pwd_cmd},
+    {"clear", clear_cmd},
     {"mkdir", mkdir_cmd},
     {"cat",   cat_cmd},
     {"cp",    cp_cmd},
