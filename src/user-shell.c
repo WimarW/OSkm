@@ -493,6 +493,17 @@ int find_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
     return 0;
 }
 
+int pwd_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out){
+    (void)argc;
+    (void)argv;
+    (void)stdin_buf;
+
+    size_t off = 0;
+    buf_append(stdout_buf, &off, max_out, current_directory_path);
+    buf_append(stdout_buf, &off, max_out, "\n");
+    return 0;
+}
+
 int grep_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
     size_t off = 0;
     bool use_regex = false;
