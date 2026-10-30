@@ -9,6 +9,8 @@
 #include "header/driver/keyboard.h"
 #include "header/driver/disk.h"
 #include "header/filesystem/ext2.h"
+#include "header/memory/paging.h"
+#include "header/memory/swap.h"
 
 void test_ext2_integration(void) {
     // 1. Read test
@@ -86,10 +88,6 @@ void kernel_setup(void) {
     keyboard_state_activate();
 
     keyboard_configuration();
-
-    initialize_filesystem_ext2();
-    // void run_kernel_disk_tests(void);
-
 
     while (true);
 }

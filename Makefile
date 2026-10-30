@@ -20,6 +20,7 @@ ARCH_CFLAG    = -m32 -march=i386 -mno-sse -mno-sse2 -mno-mmx -msoft-float -mno-a
 AFLAGS        = -f elf32 -g -F dwarf
 LFLAGS        = -T $(SOURCE_FOLDER)/linker.ld -melf_i386
 DISK_NAME     = sample-image
+SWAP_NAME = swap
 
 ifeq ($(OS),Darwin)
     LLVM_PREFIX := $(shell brew --prefix llvm)
@@ -38,21 +39,23 @@ else
     CFLAGS      := $(DEBUG_CFLAG) $(WARNING_CFLAG) $(STRIP_CFLAG) $(ARCH_CFLAG) -c -I$(SOURCE_FOLDER)
 endif
 
-run: all
-	qemu-system-i386 -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
+run: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
+	qemu-system-i386 -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
 
-debug: all
-	qemu-system-i386 -s -S -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
+debug: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
+	qemu-system-i386 -s -S -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
 
 all: build
-
 build: iso
-
 clean:
 	rm -rf $(OUTPUT_FOLDER)/*.o $(OUTPUT_FOLDER)/*.iso $(OUTPUT_FOLDER)/kernel
 
 disk:
 	@qemu-img create -f raw $(OUTPUT_FOLDER)/$(DISK_NAME).bin 4M
+
+$(OUTPUT_FOLDER)/$(SWAP_NAME).bin:
+	@mkdir -p $(OUTPUT_FOLDER)
+	@qemu-img create -f raw $@ 4M
 
 kernel:
 	@mkdir -p $(OUTPUT_FOLDER)
@@ -68,6 +71,7 @@ kernel:
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/keyboard.c -o $(OUTPUT_FOLDER)/keyboard.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/disk.c -o $(OUTPUT_FOLDER)/disk.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/ext2.c -o $(OUTPUT_FOLDER)/ext2.o
+	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/swap.c -o $(OUTPUT_FOLDER)/swap.o
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/intsetup.s -o $(OUTPUT_FOLDER)/intsetup.o
 	@echo Linking object files and generate elf32...
 	@$(LIN) $(LFLAGS) $(OUTPUT_FOLDER)/*.o -o $(OUTPUT_FOLDER)/kernel
