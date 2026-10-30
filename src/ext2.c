@@ -766,21 +766,38 @@ int8_t read(struct EXT2DriverRequest request) {
 }
 
 int8_t read_directory(struct EXT2DriverRequest *prequest) {
-    if (prequest == NULL)
+    if (prequest == NULL || prequest->buf == NULL)
         return -1;
 
     struct EXT2Inode directory;
-    int8_t result = find_child_inode(
-        prequest->parent_inode, prequest->name,
-        prequest->name_len, true, &directory
-    );
 
-    if (result != 0)
-        return result;
+    if (prequest->name_len == 0 || prequest->name == NULL || (prequest->name_len == 1 && prequest->name[0] == '.')) {
+        if (!load_inode(prequest->parent_inode, &directory)) return 3;
+    } else {
+        int8_t result = find_child_inode(prequest->parent_inode, prequest->name, prequest->name_len, true, &directory);
+        if (result != 0) return result;
+    }
 
-    if (prequest->buf == NULL || prequest->buffer_size < sizeof(directory))
-        return -1;
+    if ((directory.i_mode & 0xF000u) != EXT2_S_IFDIR) return 1;
+    if (directory.i_size == 0 || directory.i_size > DISK_SPACE) return -1;
+    if (prequest->buffer_size < directory.i_size) return -1;   
 
-    memcpy(prequest->buf, &directory, sizeof(directory));
+    uint32_t block_count = (directory.i_size + BLOCK_SIZE - 1u) / BLOCK_SIZE;
+    for (uint32_t i = 0; i < block_count; i++){
+        uint32_t disk_block = inode_data_block(&directory, i);
+        if (disk_block == 0 || disk_block >= DISK_SPACE / BLOCK_SIZE) return -1;
+        
+        struct BlockBuffer block;
+        read_blocks(&block, disk_block, 1);
+
+        uint32_t remaining = directory.i_size - i * BLOCK_SIZE;
+        uint32_t bytes_to_copy = remaining < BLOCK_SIZE ? remaining : BLOCK_SIZE;
+        if (i*BLOCK_SIZE + bytes_to_copy > prequest->buffer_size) {
+            bytes_to_copy = prequest->buffer_size - i * BLOCK_SIZE;
+        }
+
+        memcpy((uint8_t *)prequest->buf + i*BLOCK_SIZE, block.buf, bytes_to_copy);
+    }
+    
     return 0;
 }
