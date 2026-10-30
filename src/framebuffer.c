@@ -50,6 +50,8 @@ void framebuffer_write(uint8_t row, uint8_t col, char c, uint8_t fg, uint8_t bg)
 void framebuffer_clear(void) {
     size_t total_bytes = FRAMEBUFFER_WIDTH * FRAMEBUFFER_HEIGHT * 2;
     memset(FRAMEBUFFER_MEMORY_OFFSET, 0x00, total_bytes);
+    cursor_row = 0;
+    cursor_col = 0;
 }
 
 char framebuffer_read(uint8_t row, uint8_t col) {
@@ -80,7 +82,7 @@ void framebuffer_putchar(char c, uint32_t color) {
     uint8_t bg = (color >> 4) & 0x0F;
 
     if (c == '\n'){
-        cursor_row = 0;
+        cursor_col = 0;
         cursor_row++;
     } else if (c == '\r'){
         cursor_col = 0;

@@ -49,4 +49,8 @@ void framebuffer_clear(void);
 
 char framebuffer_read(uint8_t row, uint8_t col);
 
+void framebuffer_scroll(void);
+void framebuffer_putchar(char c, uint32_t color);
+void framebuffer_puts(const char *str, size_t count, uint32_t color);
+
 #endif

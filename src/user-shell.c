@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "header/filesystem/ext2.h"
+#include "header/stdlib/string.h"
 
 #define BLOCK_COUNT 16
 #define MAX_PATH_LEN 256
@@ -14,17 +15,19 @@
 #define ERR_COLOR 0x0C // Red text, black bg
 
 void syscall(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
-    __asm__ volatile("mov %0, %%ebx" : /* <Empty> */ : "r"(ebx));
-    __asm__ volatile("mov %0, %%ecx" : /* <Empty> */ : "r"(ecx));
-    __asm__ volatile("mov %0, %%edx" : /* <Empty> */ : "r"(edx));
-    __asm__ volatile("mov %0, %%eax" : /* <Empty> */ : "r"(eax));
-    // Note : gcc usually use %eax as intermediate register,
-    //        so it need to be the last one to mov
-    __asm__ volatile("int $0x30");
+    __asm__ volatile(
+        "int $0x30"
+        :
+        : "a"(eax), "b"(ebx), "c"(ecx), "d"(edx)
+        : "memory"
+    );
 }
 
-
 // Utility Functions (Mainly String related)
+char *get_entry_name(void *entry) {
+    return (char *)entry + sizeof(struct EXT2DirectoryEntry);
+}
+
 size_t strlen(const char *str){
     size_t len = 0;
     while(str[len]) len++;
@@ -186,6 +189,7 @@ static char pipe_buf_2[BUFFER_SIZE];
 static uint8_t temp_buf[BUFFER_SIZE];
 
 void buf_append(char *buf, size_t *offset, size_t max, const char *str){
+    
     size_t slen = strlen(str);
     if (*offset + slen >= max-1) return;
     memcpy(buf + *offset, str, slen);
@@ -321,8 +325,9 @@ int cd_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
 }
 
 int ls_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out){
-    (void)stdin_buf;
-
+    (void)stdin_buf;    
+    (void) argc;
+    (void) argv;
     size_t offset = 0;
 
     if (fs_read_directory(current_inode,temp_buf,sizeof(temp_buf)) != 0) {
@@ -341,6 +346,11 @@ int ls_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
             memcpy(name_buf, entry_name, entry->name_len);
             name_buf[entry->name_len] = '\0';
 
+            if (strcmp(name_buf, ".") == 0 || strcmp(name_buf, "..") == 0) {
+                fs_offset += entry->rec_len;
+                continue;
+            }
+
             buf_append(stdout_buf, &offset, max_out, name_buf);
             if (entry->file_type == EXT2_FT_DIR){
                 buf_append(stdout_buf, &offset, max_out, "/");
@@ -353,13 +363,32 @@ int ls_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
 }
 
 int mkdir_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
-    (void) stdin_buf;
+        (void) stdin_buf;
     size_t offset = 0;
     if (argc < 2){
         buf_append(stdout_buf, &offset, max_out, "mkdir: missing directory operand\n");
         return -1;
     }
-    if (fs_mkdir(current_inode, argv[1]) != 0){
+
+    char name[MAX_PATH_LEN];
+    strncpy(name, argv[1], MAX_PATH_LEN - 1);
+    name[MAX_PATH_LEN - 1] = '\0';
+    size_t len = strlen(name);
+    while (len > 0 && name[len - 1] == '/') {
+        name[--len] = '\0';
+    }
+
+    if (len == 0) {
+        buf_append(stdout_buf, &offset, max_out, "mkdir: invalid directory name\n");
+        return -1;
+    }
+
+    if (strchr(name, '/') != NULL) {
+        buf_append(stdout_buf, &offset, max_out, "mkdir: nested paths are not supported\n");
+        return -1;
+    }
+
+    if (fs_mkdir(current_inode, name) != 0){
         buf_append(stdout_buf, &offset, max_out, "mkdir: failed to create directory\n");
         return -1;
     }
@@ -406,10 +435,27 @@ int cp_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size
         buf_append(stdout_buf, &offset, max_out, "cp: empty or binary source not supported\n");
         return -1;
     }
-    if (fs_write_file(current_inode, argv[2], file_buf, strlen(file_buf)) != 0) {
+
+    const char *dst_name = argv[2];
+    uint32_t dst_dir = current_inode;
+    char dst_buf[MAX_PATH_LEN];
+    strncpy(dst_buf, argv[2], MAX_PATH_LEN - 1);
+    dst_buf[MAX_PATH_LEN - 1] = '\0';
+    size_t dlen = strlen(dst_buf);
+    if (dlen > 1 && dst_buf[dlen - 1] == '/') dst_buf[--dlen] = '\0';
+
+    // If destination is an existing directory, copy into it keeping the source name
+    uint32_t t_inode; uint8_t t_type;
+    if (lookup_entry(current_inode, dst_buf, &t_inode, &t_type) && t_type == EXT2_FT_DIR) {
+        dst_dir = t_inode;
+        dst_name = argv[1];
+    } else {
+        dst_name = dst_buf;
+    }
+    if (fs_write_file(dst_dir, (char *)dst_name, file_buf, strlen(file_buf)) != 0) {
         buf_append(stdout_buf, &offset, max_out, "cp: failed to write destination file\n");
         return -1;
-    }
+    }   
     return 0;
 }
 

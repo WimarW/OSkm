@@ -4,6 +4,7 @@
 #include "header/driver/keyboard.h"
 #include "header/filesystem/ext2.h"
 #include "header/memory/swap.h"
+#include "header/text/framebuffer.h"
 
 void io_wait(void)
 {
@@ -101,6 +102,9 @@ void main_interrupt_handler(struct InterruptFrame frame)
         break;
     case PIC1_OFFSET + IRQ_KEYBOARD:
         keyboard_isr();
+        break;
+    case 0x30:
+        syscall(frame);
         break;
     default:
         break;
