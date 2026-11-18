@@ -10,10 +10,11 @@
 #include "header/filesystem/ext2.h"
 
 #define PROCESS_NAME_LENGTH_MAX          32
-#define PROCESS_PAGE_FRAME_COUNT_MAX     8
+#define PROCESS_PAGE_FRAME_COUNT_MAX     512
 #define PROCESS_COUNT_MAX                16
 
-#define KERNEL_RESERVED_PAGE_FRAME_COUNT 4
+// Already defined in paging.h
+// #define KERNEL_RESERVED_PAGE_FRAME_COUNT 4
 #define KERNEL_VIRTUAL_ADDRESS_BASE      0xC0000000
 
 #define CPU_EFLAGS_BASE_FLAG               0x2
@@ -54,23 +55,23 @@ typedef enum PROCESS_STATE {
 /**
  * Contain information needed for task to be able to get interrupted and resumed later
  *
- * @param cpu                        All CPU register state
- * @param eip                        CPU instruction counter to resume execution
- * @param eflags                     Flag register to load before resuming the execution
- * @param page_directory_virtual_addr CPU register CR3, containing pointer to active page directory
+ * @param cpu                           All CPU register state
+ * @param eip                           CPU instruction counter to resume execution
+ * @param eflags                        Flag register to load before resuming the execution
+ * @param page_directory_virtual_addr   CPU register CR3, containing pointer to active page directory
  */
 struct Context {
     struct CPURegister      cpu;
     uint32_t                eip;
     uint32_t                eflags;
-    struct PageDirectory    *page_directory_virtual_address;
+    struct PageDirectory    *page_directory_virtual_addr;
 } __attribute__((packed));
 
 /**
  * Data Structure for Process Entry
  *
  * @param metadata              pid, state, name
- * @param contexy               process context
+ * @param context               process context
  * @param memory                tracks up to 8allocated virtual page addresses
  */
 struct ProcessControlBlock {
