@@ -42,7 +42,8 @@ static uint32_t paging_find_free_frame(void) {
 /* Hanya mapping user yang dikelola allocator Chapter 3. */
 static bool paging_valid_user_request(struct PageDirectory *page_dir, void *virtual_addr) {
     uint32_t address = (uint32_t)(uintptr_t)virtual_addr;
-    return page_dir == &_paging_kernel_page_directory &&
+    return page_dir != NULL &&
+           page_dir == paging_get_current_page_directory_addr() &&
            address < USER_VIRTUAL_ADDRESS_LIMIT &&
            (address & (PAGE_FRAME_SIZE - 1u)) == 0;
 }
