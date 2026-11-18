@@ -4,6 +4,8 @@
 #include "header/stdlib/string.h"
 #include "header/memory/paging.h"
 #include "header/memory/swap.h"
+#include "header/process/process.h"
+
 
 /*
  * Tabel awal milik kernel. Pada 3.1.2–3.1.3, assembly loader akan
@@ -232,4 +234,60 @@ bool paging_free_user_page_frame(struct PageDirectory *page_dir, void *virtual_a
 
     paging_release_table_if_empty(page_dir, directory_index, page_table);
     return true;
+}
+
+__attribute__((aligned(0x1000))) static struct PageDirectory page_directory_list[PAGING_DIRECTORY_TABLE_MAX_COUNT] = {0};
+
+static struct {
+    bool page_directory_used[PAGING_DIRECTORY_TABLE_MAX_COUNT];
+} page_directory_manager = {
+    .page_directory_used = {false},
+};
+
+struct PageDirectory* paging_create_new_page_directory(void) {
+    // Note: Doesn't set pagesize 4 mb to true since pagesize is 4KiB
+    for (uint32_t i = 0; i < PAGING_DIRECTORY_TABLE_MAX_COUNT; i++){
+        if (!page_directory_manager.page_directory_used[i]){
+            page_directory_manager.page_directory_used[i] = true;
+            struct PageDirectory *new_dir = &page_directory_list[i];
+            memset(new_dir, 0, sizeof(struct PageDirectory));
+            new_dir->table[0x300] = _paging_kernel_page_directory.table[0x300];
+            uint32_t phys_addr = (uint32_t)(uintptr_t)new_dir - KERNEL_VIRTUAL_ADDRESS_BASE;
+            new_dir->table[RECURSIVE_PAGE_DIRECTORY_INDEX] = (struct PageDirectoryEntry) {
+                .flag = {
+                    .present_bit = true,
+                    .write_bit   = true,
+                },
+                .page_table_base_address = phys_addr >> 12,
+            };
+            return new_dir;
+        }
+    }
+    return NULL;
+}
+
+bool paging_free_page_directory(struct PageDirectory *page_dir) {
+    /**
+     * TODO: Iterate & clear page directory values
+     * - Iterate page_directory_list[] & check &page_directory_list[] == page_dir
+     * - If matches, mark the page directory as unusued and clear all page directory entry
+     * - Return true
+     */
+
+    return false;
+}
+
+struct PageDirectory* paging_get_current_page_directory_addr(void) {
+    uint32_t current_page_directory_phys_addr;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(current_page_directory_phys_addr): /* <Empty> */);
+    uint32_t virtual_addr_page_dir = current_page_directory_phys_addr + KERNEL_VIRTUAL_ADDRESS_BASE;
+    return (struct PageDirectory*) virtual_addr_page_dir;
+}
+
+void paging_use_page_directory(struct PageDirectory *page_dir_virtual_addr) {
+    uint32_t physical_addr_page_dir = (uint32_t) page_dir_virtual_addr;
+    // Additional layer of check & mistake safety net
+    if ((uint32_t) page_dir_virtual_addr > KERNEL_VIRTUAL_ADDRESS_BASE)
+        physical_addr_page_dir -= KERNEL_VIRTUAL_ADDRESS_BASE;
+    __asm__  volatile("mov %0, %%cr3" : /* <Empty> */ : "r"(physical_addr_page_dir): "memory");
 }
