@@ -45,9 +45,55 @@
 #define PROCESS_CREATE_FAIL_NOT_ENOUGH_MEMORY    3
 #define PROCESS_CREATE_FAIL_FS_READ_FAILURE      4
 
+typedef enum PROCESS_STATE {
+    PROCESS_STATE_INACTIVE = 0, // Process Inactive or waiting
+    PROCESS_STATE_READY, // Process is runnable and waiting for CPU time
+    PROCESS_STATE_RUNNING, // Process is currently executing on the CPU
+} PROCESS_STATE;
 
+/**
+ * Contain information needed for task to be able to get interrupted and resumed later
+ *
+ * @param cpu                        All CPU register state
+ * @param eip                        CPU instruction counter to resume execution
+ * @param eflags                     Flag register to load before resuming the execution
+ * @param page_directory_virtual_addr CPU register CR3, containing pointer to active page directory
+ */
+struct Context {
+    struct CPURegister      cpu;
+    uint32_t                eip;
+    uint32_t                eflags;
+    struct PageDirectory    *page_directory_virtual_address;
+} __attribute__((packed));
 
+/**
+ * Data Structure for Process Entry
+ *
+ * @param metadata              pid, state, name
+ * @param contexy               process context
+ * @param memory                tracks up to 8allocated virtual page addresses
+ */
+struct ProcessControlBlock {
+    struct {
+        uint32_t      pid;
+        PROCESS_STATE state;
+        char          process_name[PROCESS_NAME_LENGTH_MAX];
+    } metadata; 
+    struct Context context;
+    struct {
+        void     *virtual_addr_used[PROCESS_PAGE_FRAME_COUNT_MAX];
+        uint32_t  page_frame_used_count;
+    } memory;
+};
 
+struct ProcessManagerState {
+    uint32_t active_process_count;
+};
+
+// Stores active_process_count 
+extern struct ProcessManagerState process_manager_state;
+//List of processes
+extern struct ProcessControlBlock _process_list[PROCESS_COUNT_MAX];
 
 /**
  * Get currently running process PCB pointer

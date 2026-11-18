@@ -3,6 +3,21 @@
 #include "header/stdlib/string.h"
 #include "header/cpu/gdt.h"
 
+// process_manager_state init
+struct ProcessManagerState process_manager_state = {
+    .active_process_count = 0,
+};
+// init process list
+struct ProcessControlBlock _process_list[PROCESS_COUNT_MAX] = {0};
+
+static uint32_t ceil_div(uint32_t a, uint32_t b) {
+    if (b == 0) {
+        return 0;
+    }
+    return (a / b) + ((a % b) != 0);
+}
+
+
 
 
 int32_t process_create_user_process(struct EXT2DriverRequest request) {
