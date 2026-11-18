@@ -266,14 +266,43 @@ struct PageDirectory* paging_create_new_page_directory(void) {
     return NULL;
 }
 
-bool paging_free_page_directory(struct PageDirectory *page_dir) {
-    /**
-     * TODO: Iterate & clear page directory values
-     * - Iterate page_directory_list[] & check &page_directory_list[] == page_dir
-     * - If matches, mark the page directory as unusued and clear all page directory entry
-     * - Return true
-     */
-
+bool paging_free_page_directory(struct PageDirectory *page_dir) {    
+    if (page_dir == NULL || page_dir == paging_get_current_page_directory_addr()) {
+        return false;
+    }
+    
+    for (uint32_t i = 0; i < PAGING_DIRECTORY_TABLE_MAX_COUNT; ++i) {
+        if (&page_directory_list[i] == page_dir &&
+            page_directory_manager.page_directory_used[i]) {
+            struct PageDirectory *prev_pd = paging_get_current_page_directory_addr();
+            paging_use_page_directory(page_dir);
+            uint32_t user_pde_limit = USER_VIRTUAL_ADDRESS_LIMIT >> 22;
+            for (uint32_t dir_idx = 0; dir_idx < user_pde_limit; ++dir_idx) {
+                if (!page_dir->table[dir_idx].flag.present_bit) {
+                    continue;
+                }
+                struct PageTable *pt = paging_get_page_table(page_dir, dir_idx);
+                if (pt == NULL) {
+                    continue;
+                }
+                for (uint32_t tbl_idx = 0; tbl_idx < PAGE_ENTRY_COUNT; ++tbl_idx) {
+                    if (!pt->table[tbl_idx].flag.present_bit &&
+                        pt->table[tbl_idx].ignored != SWAP_PTE_MARKER) {
+                        continue;
+                    }
+                    void *vaddr = (void *)(uintptr_t)((dir_idx << 22) | (tbl_idx << 12));
+                    paging_free_user_page_frame(page_dir, vaddr);
+                    if (!page_dir->table[dir_idx].flag.present_bit) {
+                        break; /* PageTable frame was freed by paging_release_table_if_empty() */
+                    }
+                }
+            }
+            paging_use_page_directory(prev_pd);
+            memset(&page_directory_list[i], 0, sizeof(struct PageDirectory));
+            page_directory_manager.page_directory_used[i] = false;
+            return true;
+        }
+    }
     return false;
 }
 
