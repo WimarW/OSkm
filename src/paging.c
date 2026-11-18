@@ -57,8 +57,7 @@ struct PageTable *paging_get_page_table(
     struct PageDirectory *page_dir,
     uint32_t page_directory_index
 ) {
-    if (page_dir != &_paging_kernel_page_directory ||
-        page_directory_index >= RECURSIVE_PAGE_DIRECTORY_INDEX) {
+    if (page_dir == NULL || page_dir != paging_get_current_page_directory_addr() ||page_directory_index >= RECURSIVE_PAGE_DIRECTORY_INDEX) {
         return NULL;
     }
 
