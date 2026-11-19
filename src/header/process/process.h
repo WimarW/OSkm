@@ -72,7 +72,7 @@ struct Context {
  *
  * @param metadata              pid, state, name
  * @param context               process context
- * @param memory                tracks up to 8allocated virtual page addresses
+ * @param memory                tracks up to PROCESS_PAGE_FRAME_COUNT_MAX allocated virtual page addresses
  */
 struct ProcessControlBlock {
     struct {
