@@ -24,7 +24,7 @@ void swap_release_slot(uint32_t slot) {
 
 void swap_out(struct PageDirectory *page_dir, void *virtual_addr) {
     uint32_t address = (uint32_t)(uintptr_t)virtual_addr;
-    if (page_dir != &_paging_kernel_page_directory ||
+    if (page_dir != paging_get_current_page_directory_addr() ||
         address >= USER_VIRTUAL_ADDRESS_LIMIT ||
         (address & (PAGE_FRAME_SIZE - 1u)) != 0) {
         return;
@@ -62,7 +62,7 @@ void swap_out(struct PageDirectory *page_dir, void *virtual_addr) {
 
 bool swap_in(struct PageDirectory *page_dir, void *virtual_addr) {
     uint32_t address = (uint32_t)(uintptr_t)virtual_addr & ~(PAGE_FRAME_SIZE - 1u);
-    if (page_dir != &_paging_kernel_page_directory ||
+    if (page_dir != paging_get_current_page_directory_addr() ||
         address >= USER_VIRTUAL_ADDRESS_LIMIT) {
         return false;
     }
@@ -122,7 +122,7 @@ static bool swap_choose_victim(struct PageDirectory *pd, uint32_t *victim_addr) 
 }
 
 bool swap_ensure_free_frames(uint32_t needed) {
-    struct PageDirectory *pd = &_paging_kernel_page_directory;
+    struct PageDirectory *pd = paging_get_current_page_directory_addr();
     while (page_manager_state.free_page_frame_count < needed) {
         uint32_t before = page_manager_state.free_page_frame_count;
         uint32_t victim;
@@ -144,7 +144,7 @@ static bool swap_page_is_swapped(struct PageDirectory *pd, uint32_t page) {
 }
 
 void handle_page_fault(uint32_t error_code) {
-    struct PageDirectory *pd = &_paging_kernel_page_directory;
+    struct PageDirectory *pd = paging_get_current_page_directory_addr();
     uint32_t page = read_cr2() & ~(PAGE_FRAME_SIZE - 1u);
 
     if ((error_code & 1u) || !swap_page_is_swapped(pd, page)) {
