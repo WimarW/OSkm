@@ -46,6 +46,8 @@ segment_register_setup:
     pop eax
     popf
 
+    cld ; C requires forward string operations; original user DF stays in the iret frame.
+
     ; Use the current esp as base stack frame, this is only for main_interrupt_handler()
     mov  ebp, esp 
     ; Call the C function

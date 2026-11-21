@@ -12,6 +12,7 @@
 #include "header/memory/paging.h"
 #include "header/memory/swap.h"
 #include "header/process/process.h"
+#include "header/process/scheduler.h"
 
 
 void kernel_setup(void) {
@@ -41,12 +42,12 @@ void kernel_setup(void) {
         .name_len     = 5,
     };
 
-    // Set TSS $esp pointer and jump into shell
+    // Set the kernel interrupt stack before starting the first user process.
     set_tss_kernel_current_stack();
-    // kernel_execute_user_program((uint8_t*) 0);
     if (process_create_user_process(request) == PROCESS_CREATE_SUCCESS) {
-        paging_use_page_directory(_process_list[0].context.page_directory_virtual_addr);
-        kernel_execute_user_program((void*) 0x0);
+        __asm__ volatile("cli" : : : "memory");
+        scheduler_init();
+        scheduler_switch_to_next_process();
     }
 
     while (true);

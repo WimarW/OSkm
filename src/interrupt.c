@@ -5,6 +5,7 @@
 #include "header/filesystem/ext2.h"
 #include "header/memory/swap.h"
 #include "header/text/framebuffer.h"
+#include "header/process/scheduler.h"
 
 void io_wait(void)
 {
@@ -100,6 +101,26 @@ void main_interrupt_handler(struct InterruptFrame frame)
     case 14:
         handle_page_fault(frame.int_stack.error_code);
         break;
+    case PIC1_OFFSET + IRQ_TIMER:
+        // Only user execution can be preempted by this scheduler. A kernel IRQ
+        // (including idle) has no hardware user-stack tail and returns normally.
+        if ((frame.int_stack.cs & 0x3u) == 0x3u &&
+            process_get_current_running_pcb_pointer() != NULL) {
+            struct Context ctx = {
+                .cpu = frame.cpu,
+                .eip = frame.int_stack.eip,
+                .eflags = frame.int_stack.eflags,
+                .page_directory_virtual_addr = paging_get_current_page_directory_addr(),
+            };
+            ctx.cpu.stack.esp = frame.user_esp;
+            scheduler_save_context_to_current_running_pcb(ctx);
+
+            // The switch never returns here. ACK before leaving this handler;
+            // kernel-mode IRQ0 still uses the shared ACK at the bottom instead.
+            pic_ack(IRQ_TIMER);
+            scheduler_switch_to_next_process();
+        }
+        break;
     case PIC1_OFFSET + IRQ_KEYBOARD:
         keyboard_isr();
         break;
@@ -119,6 +140,26 @@ void main_interrupt_handler(struct InterruptFrame frame)
 void activate_keyboard_interrupt(void)
 {
     out(PIC1_DATA, in(PIC1_DATA) & ~(1 << IRQ_KEYBOARD));
+}
+
+void activate_timer_interrupt(void)
+{
+    uint32_t saved_eflags;
+    // Prevent interrupts while writing the two-byte divisor and updating PIC mask.
+    __asm__ volatile("pushfl; popl %0; cli" : "=r"(saved_eflags) : : "memory");
+
+    uint16_t counter = PIT_TIMER_COUNTER;
+    out(PIT_COMMAND_REGISTER_PIO, PIT_COMMAND_VALUE);
+    out(PIT_CHANNEL_0_DATA_PIO, (uint8_t)(counter & 0xFF));
+    out(PIT_CHANNEL_0_DATA_PIO, (uint8_t)(counter >> 8));
+
+    // Clear only IRQ0's mask bit, preserving IRQ1 (keyboard) and all other masks.
+    out(PIC1_DATA, in(PIC1_DATA) & ~(1 << IRQ_TIMER));
+
+    // IF is EFLAGS bit 9. A caller that disabled interrupts keeps them disabled.
+    if (saved_eflags & (1u << 9)) {
+        __asm__ volatile("sti" : : : "memory");
+    }
 }
 
 

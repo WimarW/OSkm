@@ -60,6 +60,22 @@
 #define IRQ_SECOND_ATA   15
 
 
+/* -- PIT channel 0: periodic IRQ0 -- */
+#define PIT_MAX_FREQUENCY                 1193182u
+#define PIT_TIMER_FREQUENCY               1000u
+#define PIT_TIMER_COUNTER                 (PIT_MAX_FREQUENCY / PIT_TIMER_FREQUENCY)
+#define PIT_COMMAND_REGISTER_PIO          0x43
+#define PIT_CHANNEL_0_DATA_PIO            0x40
+#define PIT_COMMAND_VALUE_BINARY_MODE    0b0
+#define PIT_COMMAND_VALUE_OPR_SQUARE_WAVE (0b011 << 1)
+#define PIT_COMMAND_VALUE_ACC_LOHIBYTE    (0b11 << 4)
+#define PIT_COMMAND_VALUE_CHANNEL        (0b00 << 6)
+#define PIT_COMMAND_VALUE (PIT_COMMAND_VALUE_BINARY_MODE | \
+                           PIT_COMMAND_VALUE_OPR_SQUARE_WAVE | \
+                           PIT_COMMAND_VALUE_ACC_LOHIBYTE | \
+                           PIT_COMMAND_VALUE_CHANNEL)
+
+
 /**
  * CPURegister, store CPU registers values.
  * 
@@ -112,18 +128,28 @@ struct InterruptStack {
 
 /**
  * InterruptFrame, entirety of general CPU states exactly before interrupt.
- * When used for interrupt handler, cpu.stack is kernel state before C function called,
- * not user stack when it get called. Check InterruptStack and interprivilege interrupt for more detail.
+ * The common prefix is present on all interrupts. user_esp and user_ss are only
+ * pushed by the CPU on a privilege transition; read them only when int_stack.cs
+ * identifies user mode. Use user_esp for context saving rather than the PUSHAD
+ * ESP slot, whose meaning also depends on the interrupt stub's normalization.
  * 
  * @param cpu        CPU state
  * @param int_number Interrupt vector value
- * @param int_stack  Hardware-defined (x86) stack state, note: will not access interprivilege ss and esp
+ * @param int_stack  Hardware-defined (x86) stack state
+ * @param user_esp   User stack pointer, valid only for an interrupt from user mode
+ * @param user_ss    User stack selector, valid only for an interrupt from user mode
  */
 struct InterruptFrame {
     struct CPURegister    cpu;
     uint32_t              int_number;
     struct InterruptStack int_stack;
+    uint32_t              user_esp;
+    uint32_t              user_ss;
 } __attribute__((packed));
+
+_Static_assert(offsetof(struct InterruptFrame, user_esp) == 68, "Interrupt user ESP offset");
+_Static_assert(offsetof(struct InterruptFrame, user_ss) == 72, "Interrupt user SS offset");
+_Static_assert(sizeof(struct InterruptFrame) == 76, "InterruptFrame size with user tail");
 
 extern struct TSSEntry _interrupt_tss_entry;
 struct TSSEntry {
@@ -137,6 +163,12 @@ struct TSSEntry {
 
 // Activate PIC mask for keyboard only
 void activate_keyboard_interrupt(void);
+
+/**
+ * Configure PIT channel 0 and unmask IRQ0 after PIC/IDT initialization.
+ * Preserves the caller's interrupt-enable flag; does not start scheduling.
+ */
+void activate_timer_interrupt(void);
 
 // I/O port wait, around 1-4 microsecond, for I/O synchronization purpose
 void io_wait(void);
@@ -154,8 +186,8 @@ void pic_remap(void);
  * This function will be called first if any INT 0x00 - 0x40 is raised, 
  * and will call proper ISR for respective interrupt / exception.
  * 
- * If inter-privilege interrupt raised, SS and ESP is automatically out of main_interrupt_handler()
- * parameter. Can be checked with ((int*) info) + 4 for user $esp, 5 for user $ss
+ * For user-mode interrupts, user_esp and user_ss describe the interrupted stack.
+ * Those tail fields do not exist on the CPU stack for kernel-mode interrupts.
  * 
  * Again, this function is not for normal function call, all parameter will be automatically set when interrupt is called.
  * @param frame Information about CPU during interrupt is raised
