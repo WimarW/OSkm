@@ -91,6 +91,12 @@ struct ProcessManagerState {
     uint32_t active_process_count;
 };
 
+struct ProcessInfo {
+    uint32_t      pid;
+    PROCESS_STATE state;
+    char          process_name[PROCESS_NAME_LENGTH_MAX];
+};
+
 // Stores active_process_count 
 extern struct ProcessManagerState process_manager_state;
 //List of processes
@@ -120,5 +126,7 @@ int32_t process_create_user_process(struct EXT2DriverRequest request);
  * @return    True if process destruction success
  */
 bool process_destroy(uint32_t pid);
+
+uint32_t process_get_active_list(struct ProcessInfo *out_list, uint32_t max_count);
 
 #endif
