@@ -90,6 +90,14 @@ void syscall(struct InterruptFrame frame) {
             framebuffer_clear();
             framebuffer_set_cursor(0, 0);
             break;
+        case 10: {
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            if (running != NULL) {
+                process_destroy(running->metadata.pid);
+            }
+            scheduler_switch_to_next_process();
+            break;
+        }
     }
 }
 
