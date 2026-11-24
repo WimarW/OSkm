@@ -13,6 +13,7 @@
 #include "header/memory/swap.h"
 #include "header/process/process.h"
 #include "header/process/scheduler.h"
+#include "header/driver/cmos.h"
 
 
 void kernel_setup(void) {
