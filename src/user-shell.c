@@ -1550,7 +1550,7 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
         "  kill <pid>               Terminate process by PID\n"
         "  help [command]           Show this help or command details\n"
         "  exit                     Shutdown and exit OSkm\n"
-        "  Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n"
+        "  Pipelines: cmd1 | cmd2   Quote patterns containing | or spaces.\n"
         "  touch <path>             Create empty file\n"
         "  edit <path>              Open simple text editor\n");
     return 0;
