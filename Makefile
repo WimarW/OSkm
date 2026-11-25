@@ -55,6 +55,8 @@ clean:
 disk:
 	@qemu-img create -f raw $(OUTPUT_FOLDER)/$(DISK_NAME).bin 4M
 
+install-apps: disk insert-shell insert-clock insert-hello
+
 inserter:
 	@mkdir -p $(OUTPUT_FOLDER)
 	@$(CC) $(INSERTER_FLAGS) -I$(SOURCE_FOLDER) \
@@ -128,4 +130,17 @@ user-clock:
 	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
 		crt0.o clock.o -o $(OUTPUT_FOLDER)/clock
 	@ls -l $(OUTPUT_FOLDER)/clock
+	@rm -f *.o
+
+insert-hello: inserter user-hello
+	@echo Inserting hello into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter hello 1 $(DISK_NAME).bin
+
+user-hello:
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/hello.c -o hello.o
+	@echo Linking hello object files and generate flat binary...
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o hello.o -o $(OUTPUT_FOLDER)/hello
+	@ls -l $(OUTPUT_FOLDER)/hello
 	@rm -f *.o

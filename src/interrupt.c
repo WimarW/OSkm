@@ -149,6 +149,14 @@ void syscall(struct InterruptFrame frame) {
             *((uint32_t*) frame.cpu.general.ecx) = count;
             break;
         }
+        case 14: {
+            struct ProcessControlBlock *cur = process_get_current_running_pcb_pointer();
+            if (cur != NULL) {
+                process_destroy(cur->metadata.pid);
+            }
+            scheduler_switch_to_next_process();
+            break;
+        }
     }
 }
 
