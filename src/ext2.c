@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include "header/stdlib/string.h"
 #include "header/filesystem/ext2.h"
+#define PTRS_PER_BLOCK (BLOCK_SIZE / sizeof(uint32_t))
 #define FS_HEADER_BLOCKS      3u
 #define META_BLOCKS_PER_GROUP (2u + INODES_TABLE_BLOCK_COUNT)
 
@@ -249,49 +250,49 @@ bool is_directory_empty(uint32_t inode) {
     return true;
 }
 
+static void free_one_block(uint32_t blk) {
+    uint32_t groups = sb.s_inodes_count / sb.s_inodes_per_group;
+    uint32_t g = blk / sb.s_blocks_per_group;
+    uint32_t i = blk % sb.s_blocks_per_group;
+    if (blk == 0 || g >= groups) return;
+
+    struct BlockBuffer b;
+    read_blocks(&b, bgd_table.table[g].bg_block_bitmap, 1);
+    if (b.buf[i / 8] & (1u << (i % 8))) {
+        b.buf[i / 8] &= (uint8_t)~(1u << (i % 8));
+        write_blocks(&b, bgd_table.table[g].bg_block_bitmap, 1);
+        bgd_table.table[g].bg_free_blocks_count++;
+        sb.s_free_blocks_count++;
+    }
+}
+
 void deallocate_blocks(void *loc, uint32_t blocks) {
     if (loc == NULL || blocks == 0) return;
 
     uint32_t *i_block = (uint32_t *)loc;
+    struct BlockBuffer ind, l2;
 
-    uint32_t has_indirect = (blocks > 12) ? 1 : 0;
-    uint32_t data_blocks  = has_indirect ? blocks - 1 : blocks;
-    if (data_blocks > 12 + (BLOCK_SIZE / sizeof(uint32_t))) return;   
+    for (uint32_t i = 0; i < 12; i++) free_one_block(i_block[i]);
 
-    uint32_t list[12 + (BLOCK_SIZE / sizeof(uint32_t)) + 1];
-    uint32_t count = 0;
-    struct BlockBuffer b;
-
-    for (uint32_t i = 0; i < data_blocks && i < 12; i++) {
-        if (i_block[i] != 0) list[count++] = i_block[i]; 
+    if (i_block[12] != 0) {
+        read_blocks(&ind, i_block[12], 1);
+        uint32_t *p = (uint32_t *)ind.buf;
+        for (uint32_t i = 0; i < PTRS_PER_BLOCK; i++) free_one_block(p[i]);
+        free_one_block(i_block[12]);
     }
 
-    if (has_indirect && i_block[12] != 0) {
-        read_blocks(&b, i_block[12], 1);
-        uint32_t *ptrs = (uint32_t *)b.buf;
-        for (uint32_t i = 12; i < data_blocks; i++) {
-            if (ptrs[i - 12] != 0) list[count++] = ptrs[i - 12];
+    if (i_block[13] != 0) {
+        read_blocks(&ind, i_block[13], 1);
+        uint32_t *d = (uint32_t *)ind.buf;
+        for (uint32_t i = 0; i < PTRS_PER_BLOCK; i++) {
+            if (d[i] == 0) continue;
+            read_blocks(&l2, d[i], 1);
+            uint32_t *p = (uint32_t *)l2.buf;
+            for (uint32_t j = 0; j < PTRS_PER_BLOCK; j++) free_one_block(p[j]);
+            free_one_block(d[i]);
         }
-        list[count++] = i_block[12];
+        free_one_block(i_block[13]);
     }
-
-    uint32_t groups = sb.s_inodes_count / sb.s_inodes_per_group;
-
-    for (uint32_t k = 0; k < count; k++) {
-        uint32_t g = list[k] / sb.s_blocks_per_group;
-        uint32_t i = list[k] % sb.s_blocks_per_group;
-        if (g >= groups) continue;
-
-        read_blocks(&b, bgd_table.table[g].bg_block_bitmap, 1);
-
-        if (b.buf[i / 8] & (1u << (i % 8))) {
-            b.buf[i / 8] &= (uint8_t)~(1u << (i % 8));
-            write_blocks(&b, bgd_table.table[g].bg_block_bitmap, 1);
-            bgd_table.table[g].bg_free_blocks_count++;
-            sb.s_free_blocks_count++;
-        }
-    }
-
 }
 
 
@@ -334,6 +335,27 @@ void deallocate_node (uint32_t inode){
     bgd_table.table[g].bg_free_inodes_count++;
     sb.s_free_inodes_count++;
     sync_metadata();
+}
+
+#define PTRS_PER_BLOCK (BLOCK_SIZE / sizeof(uint32_t))
+
+static uint32_t write_alloc_block(void) {
+    uint32_t groups = sb.s_inodes_count / sb.s_inodes_per_group;
+    struct BlockBuffer bbm;
+    for (uint32_t g = 0; g < groups; g++) {
+        if (bgd_table.table[g].bg_free_blocks_count == 0) continue;
+        read_blocks(&bbm, bgd_table.table[g].bg_block_bitmap, 1);
+        for (uint32_t i = 0; i < sb.s_blocks_per_group; i++) {
+            if (!(bbm.buf[i / 8] & (1u << (i % 8)))) {
+                bbm.buf[i / 8] |= (uint8_t)(1u << (i % 8));
+                write_blocks(&bbm, bgd_table.table[g].bg_block_bitmap, 1);
+                bgd_table.table[g].bg_free_blocks_count--;
+                sb.s_free_blocks_count--;
+                return g * sb.s_blocks_per_group + i;
+            }
+        }
+    }
+    return 0;
 }
 
 int8_t write(struct EXT2DriverRequest *request) {
@@ -385,12 +407,16 @@ int8_t write(struct EXT2DriverRequest *request) {
     }
     if (slot == NULL) return -1;
 
-    // Check if buffer_size + BLOCK_SIZE - 1 overflows uint32_t
-    if (!is_dir && request->buffer_size > (12u + BLOCK_SIZE / sizeof(uint32_t)) * BLOCK_SIZE) return -1; 
+    uint32_t max_blocks = 12 + PTRS_PER_BLOCK + PTRS_PER_BLOCK * PTRS_PER_BLOCK;
+    if (!is_dir && request->buffer_size > max_blocks * BLOCK_SIZE) return -1;
     uint32_t data_blocks = is_dir ? 1 : (request->buffer_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    if (data_blocks > 12 + (BLOCK_SIZE / sizeof(uint32_t))) return -1;
-    uint32_t has_indirect  = (data_blocks > 12) ? 1 : 0;
-    uint32_t total_blocks  = data_blocks + has_indirect;
+    if (data_blocks > max_blocks) return -1;
+
+    uint32_t dbl_data    = (data_blocks > 12 + PTRS_PER_BLOCK) ? data_blocks - 12 - PTRS_PER_BLOCK : 0;
+    uint32_t dbl_tables  = (dbl_data + PTRS_PER_BLOCK - 1) / PTRS_PER_BLOCK;
+    uint32_t total_blocks = data_blocks
+                          + (data_blocks > 12 ? 1 : 0)
+                          + (dbl_data > 0 ? 1 + dbl_tables : 0);
 
     if (sb.s_free_inodes_count < 1 || sb.s_free_blocks_count < total_blocks) return -1;
 
@@ -415,46 +441,64 @@ int8_t write(struct EXT2DriverRequest *request) {
     }
     if (ino == 0) return -1;
 
-    uint32_t blocks[12 + (BLOCK_SIZE / sizeof(uint32_t)) + 1];
-    for (uint32_t k = 0; k < total_blocks; k++) {
-        uint32_t found = 0;
-        for (uint32_t g = 0; g < groups && !found; g++) {
-            if (bgd_table.table[g].bg_free_blocks_count == 0) continue;
-            struct BlockBuffer bbm;
-            read_blocks(&bbm, bgd_table.table[g].bg_block_bitmap, 1);
-            for (uint32_t i = 0; i < sb.s_blocks_per_group; i++) {
-                if (!(bbm.buf[i / 8] & (1u << (i % 8)))) {
-                    bbm.buf[i / 8] |= (uint8_t)(1u << (i % 8));
-                    write_blocks(&bbm, bgd_table.table[g].bg_block_bitmap, 1);
-                    bgd_table.table[g].bg_free_blocks_count--;
-                    sb.s_free_blocks_count--;
-                    blocks[k] = g * sb.s_blocks_per_group + i;
-                    found = 1;
-                    break;
-                }
-            }
-        }
-        if (!found) return -1;
-    }
-
-
     struct EXT2Inode node;
     memset(&node, 0, sizeof(node));
     node.i_mode   = is_dir ? EXT2_S_IFDIR : EXT2_S_IFREG;
     node.i_size   = is_dir ? BLOCK_SIZE : request->buffer_size;
     node.i_blocks = total_blocks;
-    for (uint32_t i = 0; i < data_blocks && i < 12; i++) node.i_block[i] = blocks[i];
 
-    if (has_indirect) {
-        uint32_t indirect = blocks[data_blocks];
-        node.i_block[12] = indirect;
+    struct BlockBuffer ind, dbl, l2;
+    memset(&ind, 0, BLOCK_SIZE);
+    memset(&dbl, 0, BLOCK_SIZE);
+    memset(&l2, 0, BLOCK_SIZE);
+    uint32_t *ind_ptrs = (uint32_t *)ind.buf;
+    uint32_t *dbl_ptrs = (uint32_t *)dbl.buf;
+    uint32_t *l2_ptrs  = (uint32_t *)l2.buf;
+    uint32_t l2_block    = 0;
+    uint32_t first_block = 0;
 
-        memset(&b, 0, BLOCK_SIZE);
-        uint32_t *ptrs = (uint32_t *)b.buf;
-        for (uint32_t i = 12; i < data_blocks; i++) ptrs[i - 12] = blocks[i];
-        write_blocks(&b, indirect, 1);
+    for (uint32_t i = 0; i < data_blocks; i++) {
+        uint32_t blk = write_alloc_block();
+        if (blk == 0) return -1;
+        if (i == 0) first_block = blk;
+
+        if (i < 12) {
+            node.i_block[i] = blk;
+        } else if (i < 12 + PTRS_PER_BLOCK) {
+            if (i == 12) {
+                node.i_block[12] = write_alloc_block();
+                if (node.i_block[12] == 0) return -1;
+            }
+            ind_ptrs[i - 12] = blk;
+        } else {
+            uint32_t j = i - 12 - PTRS_PER_BLOCK;
+            if (j == 0) {
+                node.i_block[13] = write_alloc_block();
+                if (node.i_block[13] == 0) return -1;
+            }
+            if (j % PTRS_PER_BLOCK == 0) {
+                l2_block = write_alloc_block();
+                if (l2_block == 0) return -1;
+                memset(&l2, 0, BLOCK_SIZE);
+                dbl_ptrs[j / PTRS_PER_BLOCK] = l2_block;
+            }
+            l2_ptrs[j % PTRS_PER_BLOCK] = blk;
+            if (j % PTRS_PER_BLOCK == PTRS_PER_BLOCK - 1 || i == data_blocks - 1) {
+                write_blocks(&l2, l2_block, 1);
+            }
+        }
+
+        if (!is_dir) {
+            memset(&b, 0, BLOCK_SIZE);
+            uint32_t remaining = request->buffer_size - i * BLOCK_SIZE;
+            uint32_t n = remaining < BLOCK_SIZE ? remaining : BLOCK_SIZE;
+            memcpy(b.buf, (uint8_t *)request->buf + i * BLOCK_SIZE, n);
+            write_blocks(&b, blk, 1);
+        }
     }
 
+    if (data_blocks > 12) write_blocks(&ind, node.i_block[12], 1);
+    if (node.i_block[13] != 0) write_blocks(&dbl, node.i_block[13], 1);
 
     if (is_dir) {
         memset(&b, 0, BLOCK_SIZE);
@@ -474,16 +518,8 @@ int8_t write(struct EXT2DriverRequest *request) {
         dd->rec_len   = BLOCK_SIZE - dot_len;
         memcpy(get_entry_name(dd), "..", 2);
 
-        write_blocks(&b, blocks[0], 1);
+        write_blocks(&b, first_block, 1);
         bgd_table.table[inode_to_bgd(ino)].bg_used_dirs_count++;
-    } else {
-        for (uint32_t i = 0; i < data_blocks; i++) {
-            memset(&b, 0, BLOCK_SIZE);
-            uint32_t remaining = request->buffer_size - i * BLOCK_SIZE;
-            uint32_t n = remaining < BLOCK_SIZE ? remaining : BLOCK_SIZE;
-            memcpy(b.buf, (uint8_t *)request->buf + i * BLOCK_SIZE, n);
-            write_blocks(&b, blocks[i], 1);
-        }
     }
 
     sync_node(&node, ino);
