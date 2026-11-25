@@ -186,3 +186,22 @@ bool process_destroy(uint32_t pid) {
     }
     return false;
 }
+
+uint32_t process_get_active_list(struct ProcessInfo *out_list, uint32_t max_count) {
+    if (out_list == NULL || max_count == 0) {
+        return 0;
+    }
+
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < PROCESS_COUNT_MAX && count < max_count; ++i) {
+        struct ProcessControlBlock *pcb = &_process_list[i];
+        if (pcb->metadata.state != PROCESS_STATE_INACTIVE) {
+            out_list[count].pid = pcb->metadata.pid;
+            out_list[count].state = pcb->metadata.state;
+            memcpy(out_list[count].process_name, pcb->metadata.process_name, PROCESS_NAME_LENGTH_MAX);
+            out_list[count].process_name[PROCESS_NAME_LENGTH_MAX - 1] = '\0';
+            ++count;
+        }
+    }
+    return count;
+}

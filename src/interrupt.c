@@ -6,6 +6,9 @@
 #include "header/memory/swap.h"
 #include "header/text/framebuffer.h"
 #include "header/process/scheduler.h"
+#include "header/process/process.h"
+#include "header/driver/cmos.h"
+#include "header/stdlib/string.h"
 
 void io_wait(void)
 {
@@ -89,6 +92,61 @@ void syscall(struct InterruptFrame frame) {
         case 8:
             framebuffer_clear();
             framebuffer_set_cursor(0, 0);
+            break;
+        case 9:
+            cmos_read_time((struct CMOSTime*) frame.cpu.general.ebx);
+            break;
+        case 10: {
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            if (running != NULL) {
+                process_destroy(running->metadata.pid);
+            }
+            scheduler_switch_to_next_process();
+            break;
+        }
+        case 11: {
+            int32_t ret = PROCESS_CREATE_FAIL_INVALID_ENTRYPOINT;
+            if (frame.cpu.general.ebx != 0) {
+                ret = process_create_user_process(
+                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+                );
+            }
+            if (frame.cpu.general.ecx != 0) {
+                *((int32_t*) frame.cpu.general.ecx) = ret;
+            }
+            break;
+        }
+        case 12: {
+            uint32_t target_pid = frame.cpu.general.ebx;
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            bool is_self = (running != NULL && running->metadata.pid == target_pid);
+            bool destroyed = process_destroy(target_pid);
+            if (is_self && destroyed) {
+                scheduler_switch_to_next_process();
+            }
+            if (frame.cpu.general.ecx != 0) {
+                *((bool*) frame.cpu.general.ecx) = destroyed;
+            }
+            break;
+        }
+        case 13: {
+            uint32_t count = process_get_active_list(
+                (struct ProcessInfo*) frame.cpu.general.ebx,
+                frame.cpu.general.ecx
+            );
+            if (frame.cpu.general.edx != 0) {
+                *((uint32_t*) frame.cpu.general.edx) = count;
+            }
+            break;
+        }
+        case 14:
+            framebuffer_write(
+                (frame.cpu.general.ebx >> 16) & 0xFFFF,
+                frame.cpu.general.ebx & 0xFFFF,
+                (char) frame.cpu.general.ecx,
+                frame.cpu.general.edx,
+                0
+            );
             break;
     }
 }
