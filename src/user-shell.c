@@ -1179,6 +1179,8 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
             buf_append(stdout_buf, &off, max_out, "Usage: cat [file]\n  Print file contents (or pass through piped input).\n");
         } else if (strcmp(cmd, "cp") == 0) {
             buf_append(stdout_buf, &off, max_out, "Usage: cp <src> <dst>\n  Copy a file to a new path or into a directory.\n");
+        } else if (strcmp(cmd, "exec") == 0) {
+            buf_append(stdout_buf, &off, max_out, "exec: exec <path>\n  Run user program in the given path\n");
         } else if (strcmp(cmd, "rm") == 0) {
             buf_append(stdout_buf, &off, max_out, "Usage: rm <path>\n  Remove a file or an empty directory.\n");
         } else if (strcmp(cmd, "mv") == 0) {
@@ -1224,6 +1226,7 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
         "  exec <path>              Run executable program as new process\n"
         "  ps                       List active processes\n"
         "  kill <pid>               Terminate process by PID\n"
+        "  exec <path>              Executes given user program\n"
         "  help [command]           Show this help or command details\n"
         "Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n");
     return 0;
