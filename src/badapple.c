@@ -27,6 +27,12 @@ static void syscall(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
     );
 }
 
+static char sys_getc(void) {
+    char c = 0;
+    syscall(4, (uint32_t)&c, 0, 0);
+    return c;
+}
+
 static uint32_t sys_ticks(void) {
     uint32_t t = 0;
     syscall(15, (uint32_t)&t, 0, 0);
@@ -71,6 +77,8 @@ int main(void) {
     uint32_t shown = 0xFFFFFFFFu;
 
     while (true) {
+        char k = sys_getc();
+        if (k == 0x1B || k == 0x03) break;
         uint32_t frame = (sys_ticks() - start) * fps / 1000u;
         if (frame >= count) break;
         if (frame == shown) continue;
@@ -91,5 +99,8 @@ int main(void) {
     }
 
     sys_clear();
+    syscall(6, (uint32_t)"user@os:", 8, 0x0A);
+    syscall(6, (uint32_t)"/",        1, 0x0B);
+    syscall(6, (uint32_t)"$ ",       2, 0x0A);
     return 0;
 }
