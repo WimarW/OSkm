@@ -47,7 +47,7 @@ run: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
 debug: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
 	qemu-system-i386 -s -S -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
 
-all: build
+all: build install-apps
 build: iso
 clean:
 	rm -rf $(OUTPUT_FOLDER)/*.o $(OUTPUT_FOLDER)/*.iso $(OUTPUT_FOLDER)/kernel $(OUTPUT_FOLDER)/*.bin
