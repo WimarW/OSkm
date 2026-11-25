@@ -27,16 +27,16 @@ void kernel_setup(void) {
     splash_hide_cursor();
     splash_draw_nairo();
     splash_draw_progress(20, "Initializing interrupts...");
-    splash_delay(150000000);
+    splash_delay(35000000);
 
     initialize_filesystem_ext2();
     splash_draw_progress(50, "Mounted EXT2 filesystem");
-    splash_delay(150000000);
+    splash_delay(35000000);
 
     gdt_install_tss();
     set_tss_register();
     splash_draw_progress(75, "Configured TSS & memory");
-    splash_delay(150000000);
+    splash_delay(35000000);
 
     // Write shell into memory
     struct EXT2DriverRequest request = {
@@ -51,7 +51,7 @@ void kernel_setup(void) {
     set_tss_kernel_current_stack();
     if (process_create_user_process(request) == PROCESS_CREATE_SUCCESS) {
         splash_draw_progress(100, "Starting NAIRO shell...");
-        splash_delay(300000000);
+        splash_delay(100000000);
         framebuffer_clear();
         framebuffer_set_cursor(0, 0);
         
