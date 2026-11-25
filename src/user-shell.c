@@ -111,6 +111,39 @@ void sys_clear_screen(void) {
     syscall(8, 0, 0, 0);
 }
 
+int32_t sys_exec(const char *name) {
+    int32_t ret = -1;
+    syscall(11, (uint32_t)name, (uint32_t)&ret, 0);
+    return ret;
+}
+
+struct ProcessInfo {
+    uint32_t pid;
+    uint32_t state;
+    char     name[32];
+};
+
+uint32_t sys_ps(struct ProcessInfo *list) {
+    uint32_t count = 0;
+    syscall(13, (uint32_t)list, (uint32_t)&count, 0);
+    return count;
+}
+
+int32_t sys_kill(uint32_t pid) {
+    int32_t ret = -1;
+    syscall(12, pid, (uint32_t)&ret, 0);
+    return ret;
+}
+
+static void u32_to_str(uint32_t v, char *out) {
+    char tmp[11];
+    int n = 0;
+    if (v == 0) tmp[n++] = '0';
+    while (v > 0) { tmp[n++] = (char)('0' + v % 10); v /= 10; }
+    for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
+    out[n] = '\0';
+}
+
 int8_t fs_read(uint32_t parent_inode, char *name, void *buf, uint32_t size){
     int8_t retcode = -1;
     struct EXT2DriverRequest request = {
@@ -1053,6 +1086,70 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
     return 0;
 }
 
+int exec_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)stdin_buf;
+    size_t off = 0;
+
+    if (argc < 2) {
+        buf_append(stdout_buf, &off, max_out, "exec: usage: exec <program>\n");
+        return -1;
+    }
+
+    int32_t ret = sys_exec(argv[1]);
+    if (ret != 0) {
+        buf_append(stdout_buf, &off, max_out, "exec: failed to run ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+
+    buf_append(stdout_buf, &off, max_out, argv[1]);
+    buf_append(stdout_buf, &off, max_out, " running..\n");
+    return 0;
+}
+
+int ps_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)argc; (void)argv; (void)stdin_buf;
+    size_t off = 0;
+    struct ProcessInfo list[16];
+    uint32_t count = sys_ps(list);
+
+    buf_append(stdout_buf, &off, max_out, "PID  NAME\n");
+    for (uint32_t i = 0; i < count; i++) {
+        char num[12];
+        u32_to_str(list[i].pid, num);
+        buf_append(stdout_buf, &off, max_out, num);
+        buf_append(stdout_buf, &off, max_out, "    ");
+        buf_append(stdout_buf, &off, max_out, list[i].name);
+        buf_append(stdout_buf, &off, max_out, "\n");
+    }
+    return 0;
+}
+
+int kill_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)stdin_buf;
+    size_t off = 0;
+
+    if (argc < 2) {
+        buf_append(stdout_buf, &off, max_out, "kill: usage: kill <pid>\n");
+        return -1;
+    }
+    uint32_t pid = 0;
+    for (const char *p = argv[1]; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            buf_append(stdout_buf, &off, max_out, "kill: invalid pid\n");
+            return -1;
+        }
+        pid = pid * 10 + (uint32_t)(*p - '0');
+    }
+    if (sys_kill(pid) != 0) {
+        buf_append(stdout_buf, &off, max_out, "kill: failed\n");
+        return -1;
+    }
+    buf_append(stdout_buf, &off, max_out, "process killed\n");
+    return 0;
+}
+
 // REPL Shell 
 
 struct command_entry {
@@ -1073,6 +1170,9 @@ static const struct command_entry COMMAND_TABLE[] = {
     {"find",  find_cmd},
     {"grep",  grep_cmd},
     {"help", help_cmd},
+    {"exec", exec_cmd},
+    {"ps",   ps_cmd},
+    {"kill", kill_cmd},
     {NULL,    NULL}
 };
 

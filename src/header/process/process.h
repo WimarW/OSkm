@@ -121,4 +121,10 @@ int32_t process_create_user_process(struct EXT2DriverRequest request);
  */
 bool process_destroy(uint32_t pid);
 
+struct ProcessInfo {
+    uint32_t pid;
+    uint32_t state;
+    char     name[PROCESS_NAME_LENGTH_MAX];
+};
+
 #endif

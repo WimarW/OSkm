@@ -6,6 +6,9 @@
 #include "header/memory/swap.h"
 #include "header/text/framebuffer.h"
 #include "header/process/scheduler.h"
+#include "header/process/process.h"
+#include "header/driver/cmos.h"
+#include "header/stdlib/string.h"
 
 void io_wait(void)
 {
@@ -90,6 +93,62 @@ void syscall(struct InterruptFrame frame) {
             framebuffer_clear();
             framebuffer_set_cursor(0, 0);
             break;
+        case 9:
+            cmos_read_time((struct CMOSTime*) frame.cpu.general.ebx);
+            break;
+        case 10:
+            framebuffer_write(
+                (frame.cpu.general.ebx >> 16) & 0xFFFF,
+                frame.cpu.general.ebx & 0xFFFF,
+                (char) frame.cpu.general.ecx,
+                frame.cpu.general.edx,
+                0
+            );
+            break;
+        case 11: {
+            char name[PROCESS_NAME_LENGTH_MAX];
+            const char *user_name = (const char*) frame.cpu.general.ebx;
+            uint8_t len = 0;
+            while (len < PROCESS_NAME_LENGTH_MAX - 1 && user_name[len] != '\0') {
+                name[len] = user_name[len];
+                len++;
+            }
+            name[len] = '\0';
+
+            struct EXT2DriverRequest request = {
+                .buf          = (uint8_t*) 0,
+                .name         = name,
+                .name_len     = len,
+                .parent_inode = 1,
+                .buffer_size  = 0x100000,
+                .is_directory = false,
+            };
+            *((int32_t*) frame.cpu.general.ecx) = process_create_user_process(request);
+            break;
+        }
+        case 12: {
+            uint32_t pid = frame.cpu.general.ebx;
+            struct ProcessControlBlock *cur = process_get_current_running_pcb_pointer();
+            int32_t result = -1;
+            if (cur != NULL && cur->metadata.pid != pid) {
+                result = process_destroy(pid) ? 0 : -1;
+            }
+            *((int32_t*) frame.cpu.general.ecx) = result;
+            break;
+        }
+        case 13: {
+            struct ProcessInfo *out = (struct ProcessInfo*) frame.cpu.general.ebx;
+            uint32_t count = 0;
+            for (uint32_t i = 0; i < PROCESS_COUNT_MAX; i++) {
+                if (_process_list[i].metadata.state == PROCESS_STATE_INACTIVE) continue;
+                out[count].pid   = _process_list[i].metadata.pid;
+                out[count].state = (uint32_t) _process_list[i].metadata.state;
+                memcpy(out[count].name, _process_list[i].metadata.process_name, PROCESS_NAME_LENGTH_MAX);
+                count++;
+            }
+            *((uint32_t*) frame.cpu.general.ecx) = count;
+            break;
+        }
     }
 }
 
