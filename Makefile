@@ -42,7 +42,7 @@ else
 endif
 
 run: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
-	qemu-system-i386 -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
+	qemu-system-i386 -rtc base=localtime -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
 
 debug: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
 	qemu-system-i386 -s -S -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
@@ -88,6 +88,7 @@ kernel:
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/ext2.c -o $(OUTPUT_FOLDER)/ext2.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/swap.c -o $(OUTPUT_FOLDER)/swap.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/process.c -o $(OUTPUT_FOLDER)/process.o
+	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/cmos.c -o $(OUTPUT_FOLDER)/cmos.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/scheduler.c -o $(OUTPUT_FOLDER)/scheduler.o
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/context-switch.s -o $(OUTPUT_FOLDER)/context-switch.o
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/intsetup.s -o $(OUTPUT_FOLDER)/intsetup.o
@@ -113,5 +114,18 @@ user-shell:
 	@echo Linking object shell object files and generate ELF32 for debugging...
 	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=elf32-i386 \
 		crt0.o user-shell.o string.o -o $(OUTPUT_FOLDER)/shell_elf
-	@size --target=binary $(OUTPUT_FOLDER)/shell
+	@ls -l $(OUTPUT_FOLDER)/shell
+	@rm -f *.o
+
+insert-clock: inserter user-clock
+	@echo Inserting clock into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter clock 1 $(DISK_NAME).bin
+
+user-clock:
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/clock.c -o clock.o
+	@echo Linking clock object files and generate flat binary...
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o clock.o -o $(OUTPUT_FOLDER)/clock
+	@ls -l $(OUTPUT_FOLDER)/clock
 	@rm -f *.o
