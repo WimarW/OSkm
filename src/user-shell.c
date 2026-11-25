@@ -208,6 +208,10 @@ uint32_t sys_get_process_info(struct ProcessInfo *list, uint32_t max_count) {
     return count;
 }
 
+void sys_shutdown(void) {
+    syscall(15, 0, 0, 0);
+}
+
 
 // State and Buffer Management Functions
 static char current_directory_path[MAX_PATH_LEN] = "/";
@@ -1160,6 +1164,16 @@ int exec_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
     return -1;
 }
 
+int exit_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)argc;
+    (void)argv;
+    (void)stdin_buf;
+    (void)stdout_buf;
+    (void)max_out;
+    sys_shutdown();
+    return 0;
+}
+
 int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
     (void)stdin_buf;
     size_t off = 0;
@@ -1202,6 +1216,8 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
             buf_append(stdout_buf, &off, max_out, "Usage: kill <pid>\n  Terminate a running process by PID.\n");
         } else if (strcmp(cmd, "help") == 0) {
             buf_append(stdout_buf, &off, max_out, "Usage: help [command]\n  Show available commands or details for one command.\n");
+        } else if (strcmp(cmd, "exit") == 0){
+            buf_append(stdout_buf, &off, max_out, "Usage: exit\n  Shut down and exit the OS.\n");
         } else {
             buf_append(stdout_buf, &off, max_out, "help: unknown command: ");
             buf_append(stdout_buf, &off, max_out, cmd);
@@ -1228,6 +1244,7 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
         "  kill <pid>               Terminate process by PID\n"
         "  exec <path>              Executes given user program\n"
         "  help [command]           Show this help or command details\n"
+        "  exit                     Shutdown and exit OSkm\n"
         "Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n");
     return 0;
 }
@@ -1255,6 +1272,7 @@ static const struct command_entry COMMAND_TABLE[] = {
     {"ps",    ps_cmd},
     {"kill",  kill_cmd},
     {"help", help_cmd},
+    {"exit", exit_cmd},
     {NULL,    NULL}
 };
 

@@ -148,6 +148,21 @@ void syscall(struct InterruptFrame frame) {
                 0
             );
             break;
+        case 15:
+            framebuffer_clear();
+            framebuffer_puts("Shutting down OSkm...\n", 22, 0x0F);
+            
+            // ACPI poweroff ports (QEMU, Bochs/older QEMU, VirtualBox)
+            out16(0x604, 0x2000);   // QEMU (modern PIIX4)
+            out16(0xB004, 0x2000);  // Bochs / older QEMU
+            out16(0x4004, 0x3400);  // VirtualBox
+            
+            // Fallback halt if emulator didn't power off
+            __asm__ volatile("cli");
+            while (true) {
+                __asm__ volatile("hlt");
+            }
+            break;
     }
 }
 
