@@ -10,6 +10,7 @@
 #include "header/driver/cmos.h"
 #include "header/stdlib/string.h"
 
+static uint32_t clock_active_until = 0;
 volatile uint32_t system_ticks = 0;
 
 void io_wait(void)
@@ -141,7 +142,11 @@ void syscall(struct InterruptFrame frame) {
             }
             break;
         }
-        case 14:
+        case 14: {
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            if (running != NULL && memcmp(running->metadata.process_name, "clock", 6) == 0) {
+                clock_active_until = system_ticks + 1500;
+            }
             framebuffer_write(
                 (frame.cpu.general.ebx >> 16) & 0xFFFF,
                 frame.cpu.general.ebx & 0xFFFF,
@@ -150,13 +155,16 @@ void syscall(struct InterruptFrame frame) {
                 0
             );
             break;
+        }
         case 15:
             *((uint32_t*) frame.cpu.general.ebx) = system_ticks;
             break;
         case 16: {
             const char *buf = (const char*) frame.cpu.general.ebx;
+            bool protect_clock = (system_ticks < clock_active_until);
             for (uint32_t row = 0; row < 25; row++) {
                 for (uint32_t col = 0; col < 80; col++) {
+                    if (protect_clock && row == 24 && col >= 72) continue;
                     framebuffer_write(row, col, buf[row * 80 + col], frame.cpu.general.ecx, 0);
                 }
             }
@@ -178,6 +186,12 @@ void syscall(struct InterruptFrame frame) {
             }
             break;
         }
+        case 18:
+            framebuffer_set_cursor(
+                (uint8_t) frame.cpu.general.ebx,
+                (uint8_t) frame.cpu.general.ecx
+            );
+        break;
     }
 }
 

@@ -5,6 +5,8 @@
 #include "header/stdlib/string.h"
 #include "header/cpu/portio.h"
 
+#define SHELL_HEIGHT (FRAMEBUFFER_HEIGHT - 1) // rows 0..23 for shell, row 24 reserved for clock
+
 static uint8_t cursor_row = 0;
 static uint8_t cursor_col = 0;
 
@@ -63,17 +65,15 @@ char framebuffer_read(uint8_t row, uint8_t col) {
 
 void framebuffer_scroll(void) {
     size_t line_bytes = FRAMEBUFFER_WIDTH * 2;
-
-    for (uint8_t r = 1; r < FRAMEBUFFER_HEIGHT; r++) {
+    for (uint8_t r = 1; r < SHELL_HEIGHT; r++) {
         memcpy(
             (void*)(FRAMEBUFFER_MEMORY_OFFSET + (r - 1) * line_bytes),
             (void*)(FRAMEBUFFER_MEMORY_OFFSET + r * line_bytes),
             line_bytes
         );
     }
-
     for (uint8_t c = 0; c < FRAMEBUFFER_WIDTH; c++) {
-        framebuffer_write(FRAMEBUFFER_HEIGHT - 1, c, ' ', 0x07, 0x00);
+        framebuffer_write(SHELL_HEIGHT - 1, c, ' ', 0x07, 0x00);
     }
 }
 
@@ -100,9 +100,9 @@ void framebuffer_putchar(char c, uint32_t color) {
         cursor_row++;
     }
 
-    while (cursor_row >= FRAMEBUFFER_HEIGHT) {
+    while (cursor_row >= SHELL_HEIGHT) {
         framebuffer_scroll();
-        cursor_row = FRAMEBUFFER_HEIGHT - 1;
+        cursor_row = SHELL_HEIGHT - 1;
     }
 
     framebuffer_set_cursor(cursor_row, cursor_col);
