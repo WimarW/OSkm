@@ -6,6 +6,9 @@
 #include "header/memory/swap.h"
 #include "header/text/framebuffer.h"
 #include "header/process/scheduler.h"
+#include "header/process/process.h"
+#include "header/driver/cmos.h"
+#include "header/stdlib/string.h"
 
 void io_wait(void)
 {
@@ -90,6 +93,9 @@ void syscall(struct InterruptFrame frame) {
             framebuffer_clear();
             framebuffer_set_cursor(0, 0);
             break;
+        case 9:
+            cmos_read_time((struct CMOSTime*) frame.cpu.general.ebx);
+            break;
         case 10: {
             struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
             if (running != NULL) {
@@ -133,6 +139,15 @@ void syscall(struct InterruptFrame frame) {
             }
             break;
         }
+        case 14:
+            framebuffer_write(
+                (frame.cpu.general.ebx >> 16) & 0xFFFF,
+                frame.cpu.general.ebx & 0xFFFF,
+                (char) frame.cpu.general.ecx,
+                frame.cpu.general.edx,
+                0
+            );
+            break;
     }
 }
 
