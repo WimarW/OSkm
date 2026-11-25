@@ -13,6 +13,36 @@
 static uint32_t clock_active_until = 0;
 volatile uint32_t system_ticks = 0;
 
+static uint32_t fg_stack[PROCESS_COUNT_MAX];
+static uint32_t fg_stack_len = 0;
+
+static void fg_push(uint32_t pid) {
+    if (pid == 0) return;
+    // Remove pid if already present so it moves to the top without duplicates
+    uint32_t write_idx = 0;
+    for (uint32_t i = 0; i < fg_stack_len; i++) {
+        if (fg_stack[i] != pid) {
+            fg_stack[write_idx++] = fg_stack[i];
+        }
+    }
+    fg_stack_len = write_idx;
+    if (fg_stack_len < PROCESS_COUNT_MAX) {
+        fg_stack[fg_stack_len++] = pid;
+    }
+}
+static void fg_remove(uint32_t pid) {
+    uint32_t write_idx = 0;
+    for (uint32_t i = 0; i < fg_stack_len; i++) {
+        if (fg_stack[i] != pid) {
+            fg_stack[write_idx++] = fg_stack[i];
+        }
+    }
+    fg_stack_len = write_idx;
+}
+static uint32_t fg_current_pid(void) {
+    return (fg_stack_len > 0) ? fg_stack[fg_stack_len - 1] : 0;
+}
+
 void io_wait(void)
 {
     out(0x80, 0);
@@ -73,9 +103,17 @@ void syscall(struct InterruptFrame frame) {
                 *(struct EXT2DriverRequest*) frame.cpu.general.ebx
             );
             break;
-        case 4:
-            get_keyboard_buffer((char*) frame.cpu.general.ebx);
+        case 4: {
+            char *out_buf = (char*) frame.cpu.general.ebx;
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            uint32_t fg_pid = fg_current_pid();
+            if (fg_pid != 0 && running != NULL && running->metadata.pid != fg_pid) {
+                if (out_buf != NULL) *out_buf = 0;
+                break;
+            }
+            get_keyboard_buffer(out_buf);
             break;
+        }
         case 5:
             framebuffer_putchar(
                 (char) frame.cpu.general.ebx, 
@@ -89,9 +127,14 @@ void syscall(struct InterruptFrame frame) {
                 frame.cpu.general.edx
             ); 
             break;
-        case 7: 
+        case 7:{
             keyboard_state_activate();
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            if (running != NULL) {
+                fg_push(running->metadata.pid);
+            }
             break;
+        }
         case 8:
             framebuffer_clear();
             framebuffer_set_cursor(0, 0);
@@ -102,7 +145,9 @@ void syscall(struct InterruptFrame frame) {
         case 10: {
             struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
             if (running != NULL) {
-                process_destroy(running->metadata.pid);
+                uint32_t pid = running->metadata.pid;
+                fg_remove(pid);
+                process_destroy(pid);
             }
             scheduler_switch_to_next_process();
             break;
@@ -124,6 +169,9 @@ void syscall(struct InterruptFrame frame) {
             struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
             bool is_self = (running != NULL && running->metadata.pid == target_pid);
             bool destroyed = process_destroy(target_pid);
+            if (destroyed) {
+                fg_remove(target_pid);
+            }
             if (is_self && destroyed) {
                 scheduler_switch_to_next_process();
             }

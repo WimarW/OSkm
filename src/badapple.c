@@ -76,6 +76,8 @@ int main(void) {
     uint32_t start = sys_ticks();
     uint32_t shown = 0xFFFFFFFFu;
 
+    syscall(7, 0, 0, 0); 
+    
     while (true) {
         char k = sys_getc();
         if (k == 0x1B || k == 0x03) break;
