@@ -81,14 +81,27 @@ Setelah booting, prompt `user@os:/$` muncul.
 
 | Command | Fungsi |
 |---------|--------|
-| `ls [dir]`, `cd [dir]`, `pwd` | Navigasi direktori |
-| `mkdir`, `cp`, `mv`, `rm`, `cat` | Operasi file dan folder |
-| `find <nama>` | Cari file dari root |
-| `grep [-Eivn] <pola> [file]` | Cari teks (mendukung regex dan pipe) |
-| `clear`, `help` | Bersihkan layar, bantuan |
-| `exec <path>` | Jalankan program dari disk sebagai proses baru |
-| `ps` | Daftar proses yang berjalan |
-| `kill <pid>` | Hentikan proses |
+| `ls <dir>` | Menampilkan konten dari current working directory |
+| `cd <dir>` | Pindah working directory | 
+| `pwd` | Menampilkan current working directory path |
+| `mkdir <path>` | Membuat directory baru |
+| `touch <path/to/file>` | Membuat file baru kosong jika tidak ada |
+| `edit <path/to/file>` | Text editor sederhana | 
+| `cat <path/to/file>` | Menampilkan konten dari suatu file | 
+| `cp <src> <dst>` | Membuat salinan file `<src>` ke `<dst>` |
+| `mv <src> <dst>` | Memindah file dari `<src>` ke `<dst>` |
+| `rm <path>` | Menghapus file atau directory kosong |
+| `find <name>[/]` | Mencari suatu file atau folder(diakhiri /) | 
+| `grep [-Eivn] <pattern> <file>` | Mencari suatu pattern di suatu file (Mendukung patterb RegEx) |
+| `clear` | Mengkosongkan tampilan | 
+| `help [command]` | Menampilkan command yang ada atau cara penggunaan suatu command | 
+| `exec <path>` | Mengeksekusi program yang diberikan | 
+| `ps` | Menampilkan daftar proses aktif | 
+| `kill <pid>` | Menterminasi proses aktif |
+| `exit` | Keluar dari OSkm | 
+
+**Note:** <br> <...> argumen wajib <br> [...] argumen opsional
+
 
 Contoh:
 
@@ -156,6 +169,8 @@ Dipanggil dengan `int 0x30`. Nomor syscall di `eax`, argumen di `ebx`, `ecx`, `e
 | 14 | putc at | Cetak karakter di posisi tertentu |
 | 15 | get ticks | Baca penghitung tick timer (1 tick = 1 ms) |
 | 16 | draw frame | Salin 2000 karakter (80x25) ke layar sekaligus |
+| 17 | shutdown | Matikan OS dan QEMU |
+| 18 | set cursor | Pindahkan posisi kursor | 
 
 ## Debugging
 
