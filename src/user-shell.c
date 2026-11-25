@@ -209,7 +209,7 @@ uint32_t sys_get_process_info(struct ProcessInfo *list, uint32_t max_count) {
 }
 
 void sys_shutdown(void) {
-    syscall(15, 0, 0, 0);
+    syscall(17, 0, 0, 0);
 }
 
 
@@ -1208,8 +1208,6 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
                 "  -i  Case-insensitive match\n"
                 "  -v  Invert match\n"
                 "  -n  Show line numbers\n");
-        } else if (strcmp(cmd, "exec") == 0) {
-            buf_append(stdout_buf, &off, max_out, "Usage: exec <path>\n  Load and start an executable program as a new process.\n");
         } else if (strcmp(cmd, "ps") == 0) {
             buf_append(stdout_buf, &off, max_out, "Usage: ps\n  List active processes with PID, state, and name.\n");
         } else if (strcmp(cmd, "kill") == 0) {
@@ -1242,7 +1240,6 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
         "  exec <path>              Run executable program as new process\n"
         "  ps                       List active processes\n"
         "  kill <pid>               Terminate process by PID\n"
-        "  exec <path>              Executes given user program\n"
         "  help [command]           Show this help or command details\n"
         "  exit                     Shutdown and exit OSkm\n"
         "Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n");

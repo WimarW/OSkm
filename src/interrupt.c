@@ -10,6 +10,8 @@
 #include "header/driver/cmos.h"
 #include "header/stdlib/string.h"
 
+volatile uint32_t system_ticks = 0;
+
 void io_wait(void)
 {
     out(0x80, 0);
@@ -149,6 +151,18 @@ void syscall(struct InterruptFrame frame) {
             );
             break;
         case 15:
+            *((uint32_t*) frame.cpu.general.ebx) = system_ticks;
+            break;
+        case 16: {
+            const char *buf = (const char*) frame.cpu.general.ebx;
+            for (uint32_t row = 0; row < 25; row++) {
+                for (uint32_t col = 0; col < 80; col++) {
+                    framebuffer_write(row, col, buf[row * 80 + col], frame.cpu.general.ecx, 0);
+                }
+            }
+            break;
+        }
+        case 17:{ 
             framebuffer_clear();
             framebuffer_puts("Shutting down OSkm...\n", 22, 0x0F);
             
@@ -163,6 +177,7 @@ void syscall(struct InterruptFrame frame) {
                 __asm__ volatile("hlt");
             }
             break;
+        }
     }
 }
 
@@ -175,6 +190,7 @@ void main_interrupt_handler(struct InterruptFrame frame)
         handle_page_fault(frame.int_stack.error_code);
         break;
     case PIC1_OFFSET + IRQ_TIMER:
+        system_ticks++;
         // Only user execution can be preempted by this scheduler. A kernel IRQ
         // (including idle) has no hardware user-stack tail and returns normally.
         if ((frame.int_stack.cs & 0x3u) == 0x3u &&

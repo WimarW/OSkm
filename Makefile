@@ -145,3 +145,21 @@ user-hello:
 		crt0.o hello.o -o $(OUTPUT_FOLDER)/hello
 	@ls -l $(OUTPUT_FOLDER)/hello
 	@rm -f *.o
+
+insert-badapple: inserter user-badapple
+	@echo Inserting badapple and its data into root directory...
+	@cd $(OUTPUT_FOLDER); ./inserter badapple 1 $(DISK_NAME).bin
+	@cd $(OUTPUT_FOLDER); ./inserter badapple.bin 1 $(DISK_NAME).bin
+
+user-badapple:
+	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/badapple.c -o badapple.o
+	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/stdlib/string.c -o string.o
+	@echo Linking badapple object files and generate flat binary...
+	@$(LIN) -T $(SOURCE_FOLDER)/user-linker.ld -melf_i386 --oformat=binary \
+		crt0.o badapple.o string.o -o $(OUTPUT_FOLDER)/badapple
+	@ls -l $(OUTPUT_FOLDER)/badapple
+	@rm -f *.o
+
+run-badapple: build install-apps insert-badapple $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
+	qemu-system-i386 -rtc base=localtime -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
