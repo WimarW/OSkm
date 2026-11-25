@@ -41,7 +41,7 @@ else
 	    INSERTER_FLAGS := -g -Wno-builtin-declaration-mismatch
 endif
 
-run: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
+run: all disk user-shell insert-shell $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
 	qemu-system-i386 -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
 
 debug: all $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
@@ -89,6 +89,7 @@ kernel:
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/swap.c -o $(OUTPUT_FOLDER)/swap.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/process.c -o $(OUTPUT_FOLDER)/process.o
 	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/scheduler.c -o $(OUTPUT_FOLDER)/scheduler.o
+	@$(CC) $(CFLAGS) $(SOURCE_FOLDER)/loadscreen.c -o $(OUTPUT_FOLDER)/loadscreen.o
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/context-switch.s -o $(OUTPUT_FOLDER)/context-switch.o
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/intsetup.s -o $(OUTPUT_FOLDER)/intsetup.o
 	@echo Linking object files and generate elf32...
