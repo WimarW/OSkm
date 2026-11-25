@@ -2,6 +2,7 @@
 #include "header/filesystem/ext2.h"
 #include "header/process/process.h"
 #include "header/stdlib/string.h"
+#include "header/driver/keyboard.h"
 
 #define BLOCK_COUNT 16
 #define MAX_PATH_LEN 256
@@ -16,6 +17,10 @@
 #define ERR_COLOR 0x0C // Red text, black bg
 
 #define REGEX_MAX_STEPS 5000
+
+#define EDIT_MAX_LINES 100
+#define EDIT_MAX_COLS  79
+#define EDIT_VIEW_ROWS 24
 
 void syscall(uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx) {
     __asm__ volatile(
@@ -212,6 +217,17 @@ void sys_shutdown(void) {
     syscall(17, 0, 0, 0);
 }
 
+void sys_set_cursor(uint8_t row, uint8_t col) {
+    syscall(18, row, col, 0);
+}
+
+void sys_draw_cell(uint8_t row, uint8_t col, char c, uint8_t fg) {
+    syscall(14, ((uint32_t)row << 16) | col, (uint32_t)(uint8_t)c, fg);
+}
+
+void sys_draw_screen(const char *buf, uint32_t color) {
+    syscall(16, (uint32_t)buf, color, 0);
+}
 
 // State and Buffer Management Functions
 static char current_directory_path[MAX_PATH_LEN] = "/";
@@ -1174,6 +1190,294 @@ int exit_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
     return 0;
 }
 
+int touch_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)stdin_buf;
+    size_t offset = 0;
+    if (argc < 2) {
+        buf_append(stdout_buf, &offset, max_out, "touch: missing file operand\n");
+        return -1;
+    }
+
+    for (int i = 1; i < argc; i++) {
+        uint32_t parent_inode = 0;
+        char name[MAX_PATH_LEN];
+        bool had_slash = false;
+        if (!resolve_parent(argv[i], &parent_inode, name, sizeof(name), &had_slash) ||
+            had_slash || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+            buf_append(stdout_buf, &offset, max_out, "touch: invalid path: ");
+            buf_append(stdout_buf, &offset, max_out, argv[i]);
+            buf_append(stdout_buf, &offset, max_out, "\n");
+            return -1;
+        }
+        uint32_t existing_inode = 0;
+        uint8_t existing_type = 0;
+        if (lookup_entry(parent_inode, name, &existing_inode, &existing_type)) {
+            continue; // Already exists: leave untouched
+        }
+
+        // EXT2 write() treats buffer_size == 0 as a directory, so write 1 NUL byte
+        char empty = '\0';
+        if (fs_write_file(parent_inode, name, &empty, 1) != 0) {
+            buf_append(stdout_buf, &offset, max_out, "touch: failed to create file: ");
+            buf_append(stdout_buf, &offset, max_out, argv[i]);
+            buf_append(stdout_buf, &offset, max_out, "\n");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static char   edit_lines[EDIT_MAX_LINES][EDIT_MAX_COLS + 1];
+static size_t edit_len[EDIT_MAX_LINES];
+static char   edit_screen[25 * 80];
+static char   edit_io_buf[BUFFER_SIZE];
+
+static void edit_render(const char *filename, size_t line_count, size_t cur_row, size_t cur_col, size_t scroll_top, bool dirty, const char *status_msg) {
+    memset(edit_screen, ' ', sizeof(edit_screen));
+    for (size_t r = 0; r < EDIT_VIEW_ROWS; r++) {
+        size_t idx = scroll_top + r;
+        if (idx >= line_count) break;
+        memcpy(edit_screen + r * 80, edit_lines[idx], edit_len[idx]);
+    }
+    sys_draw_screen(edit_screen, DEFAULT_COLOR);
+
+    // Status bar on row 24
+    char bar[81];
+    size_t off = 0;
+    bar[0] = '\0';
+    buf_append(bar, &off, sizeof(bar), " ");
+    buf_append(bar, &off, sizeof(bar), filename);
+    if (dirty) buf_append(bar, &off, sizeof(bar), " *");
+    buf_append(bar, &off, sizeof(bar), " | Ctrl+S:Save Ctrl+Q:Quit");
+    if (status_msg && status_msg[0]) {
+        buf_append(bar, &off, sizeof(bar), " | ");
+        buf_append(bar, &off, sizeof(bar), status_msg);
+    }
+    for (uint8_t col = 0; col < 80; col++) {
+        char ch = (col < off) ? bar[col] : ' ';
+        sys_draw_cell(24, col, ch, DIR_COLOR);
+    }
+    sys_set_cursor((uint8_t)(cur_row - scroll_top), (uint8_t)cur_col);
+}
+
+static bool edit_save(uint32_t parent_inode, char *name, size_t line_count) {
+    size_t total = 0;
+    for (size_t r = 0; r < line_count; r++) {
+        for (size_t c = 0; c < edit_len[r] && total < sizeof(edit_io_buf) - 1; c++) {
+            edit_io_buf[total++] = edit_lines[r][c];
+        }
+        if (r + 1 < line_count && total < sizeof(edit_io_buf) - 1) {
+            edit_io_buf[total++] = '\n';
+        }
+    }
+    if (total == 0) {
+        edit_io_buf[total++] = '\0'; // avoid EXT2 buffer_size == 0 (directory)
+    }
+    uint32_t dummy_inode = 0;
+    uint8_t dummy_type = 0;
+    if (lookup_entry(parent_inode, name, &dummy_inode, &dummy_type)) {
+        if (fs_delete(parent_inode, name, false) != 0) return false;
+    }
+    return fs_write_file(parent_inode, name, edit_io_buf, (uint32_t)total) == 0;
+}
+
+int edit_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)stdin_buf;
+    size_t off = 0;
+    if (argc < 2) {
+        buf_append(stdout_buf, &off, max_out, "edit: missing file operand (edit <path>)\n");
+        return -1;
+    }
+    uint32_t parent_inode = 0;
+    char name[MAX_PATH_LEN];
+    bool had_slash = false;
+    if (!resolve_parent(argv[1], &parent_inode, name, sizeof(name), &had_slash) ||
+        had_slash || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        buf_append(stdout_buf, &off, max_out, "edit: invalid path: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+    uint32_t target_inode = 0;
+    uint8_t file_type = 0;
+    bool exists = lookup_entry(parent_inode, name, &target_inode, &file_type);
+    if (exists && file_type == EXT2_FT_DIR) {
+        buf_append(stdout_buf, &off, max_out, "edit: cannot edit directory: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+    // Load existing file (or start blank)
+    size_t line_count = 1;
+    edit_len[0] = 0;
+    edit_lines[0][0] = '\0';
+    if (exists) {
+        memset(edit_io_buf, 0, sizeof(edit_io_buf));
+        if (fs_read(parent_inode, name, edit_io_buf, sizeof(edit_io_buf) - 1) == 0) {
+            size_t r = 0, c = 0;
+            for (size_t i = 0; edit_io_buf[i] != '\0'; i++) {
+                char ch = edit_io_buf[i];
+                if (ch == '\r') continue;
+                if (ch == '\n') {
+                    edit_lines[r][c] = '\0';
+                    edit_len[r] = c;
+                    if (r + 1 >= EDIT_MAX_LINES) break;
+                    r++;
+                    c = 0;
+                    line_count = r + 1;
+                    edit_len[r] = 0;
+                    edit_lines[r][0] = '\0';
+                } else if (c < EDIT_MAX_COLS && ch >= 32 && ch <= 126) {
+                    edit_lines[r][c++] = ch;
+                }
+            }
+            edit_lines[r][c] = '\0';
+            edit_len[r] = c;
+        }
+    }
+    size_t cur_row = 0, cur_col = 0, scroll_top = 0;
+    bool dirty = false;
+    bool needs_redraw = true;
+    const char *status_msg = exists ? "Opened" : "New file";
+    while (true) {
+        if (needs_redraw) {
+            edit_render(name, line_count, cur_row, cur_col, scroll_top, dirty, status_msg);
+            needs_redraw = false;
+        }
+        char c = sys_getc();
+        if (c == 0) continue;
+        uint8_t uc = (uint8_t)c;
+        status_msg = "";
+        if (c == 0x11 || c == 0x1B) { // Ctrl+Q or ESC
+            break;
+        } else if (c == 0x13) { // Ctrl+S
+            if (edit_save(parent_inode, name, line_count)) {
+                dirty = false;
+                status_msg = "Saved!";
+            } else {
+                status_msg = "Save failed!";
+            }
+        } else if (uc == KEY_UP) {
+            if (cur_row > 0) cur_row--;
+            if (cur_col > edit_len[cur_row]) cur_col = edit_len[cur_row];
+        } else if (uc == KEY_DOWN) {
+            if (cur_row + 1 < line_count) cur_row++;
+            if (cur_col > edit_len[cur_row]) cur_col = edit_len[cur_row];
+        } else if (uc == KEY_LEFT) {
+            if (cur_col > 0) {
+                cur_col--;
+            } else if (cur_row > 0) {
+                cur_row--;
+                cur_col = edit_len[cur_row];
+            }
+        } else if (uc == KEY_RIGHT) {
+            if (cur_col < edit_len[cur_row]) {
+                cur_col++;
+            } else if (cur_row + 1 < line_count) {
+                cur_row++;
+                cur_col = 0;
+            }
+        } else if (uc == KEY_HOME) {
+            cur_col = 0;
+        } else if (uc == KEY_END) {
+            cur_col = edit_len[cur_row];
+        } else if (uc == KEY_PAGE_UP) {
+            cur_row = (cur_row > EDIT_VIEW_ROWS) ? (cur_row - EDIT_VIEW_ROWS) : 0;
+            if (cur_col > edit_len[cur_row]) cur_col = edit_len[cur_row];
+        } else if (uc == KEY_PAGE_DOWN) {
+            cur_row += EDIT_VIEW_ROWS;
+            if (cur_row >= line_count) cur_row = line_count - 1;
+            if (cur_col > edit_len[cur_row]) cur_col = edit_len[cur_row];
+        } else if (c == '\n' || c == '\r') {
+            if (line_count < EDIT_MAX_LINES) {
+                for (size_t r = line_count; r > cur_row + 1; r--) {
+                    memcpy(edit_lines[r], edit_lines[r - 1], EDIT_MAX_COLS + 1);
+                    edit_len[r] = edit_len[r - 1];
+                }
+                size_t tail = edit_len[cur_row] - cur_col;
+                memcpy(edit_lines[cur_row + 1], edit_lines[cur_row] + cur_col, tail);
+                edit_lines[cur_row + 1][tail] = '\0';
+                edit_len[cur_row + 1] = tail;
+                edit_lines[cur_row][cur_col] = '\0';
+                edit_len[cur_row] = cur_col;
+                line_count++;
+                cur_row++;
+                cur_col = 0;
+                dirty = true;
+            }
+        } else if (c == '\b' || c == 0x7F) {
+            if (cur_col > 0) {
+                for (size_t i = cur_col - 1; i < edit_len[cur_row]; i++) {
+                    edit_lines[cur_row][i] = edit_lines[cur_row][i + 1];
+                }
+                cur_col--;
+                edit_len[cur_row]--;
+                dirty = true;
+            } else if (cur_row > 0) {
+                size_t prev_len = edit_len[cur_row - 1];
+                size_t copy_len = edit_len[cur_row];
+                if (prev_len + copy_len > EDIT_MAX_COLS) {
+                    copy_len = EDIT_MAX_COLS - prev_len;
+                }
+                memcpy(edit_lines[cur_row - 1] + prev_len, edit_lines[cur_row], copy_len);
+                edit_len[cur_row - 1] = prev_len + copy_len;
+                edit_lines[cur_row - 1][edit_len[cur_row - 1]] = '\0';
+                for (size_t r = cur_row; r + 1 < line_count; r++) {
+                    memcpy(edit_lines[r], edit_lines[r + 1], EDIT_MAX_COLS + 1);
+                    edit_len[r] = edit_len[r + 1];
+                }
+                line_count--;
+                cur_row--;
+                cur_col = prev_len;
+                dirty = true;
+            }
+        } else if (uc == KEY_DELETE) {
+            if (cur_col < edit_len[cur_row]) {
+                for (size_t i = cur_col; i < edit_len[cur_row]; i++) {
+                    edit_lines[cur_row][i] = edit_lines[cur_row][i + 1];
+                }
+                edit_len[cur_row]--;
+                dirty = true;
+            } else if (cur_row + 1 < line_count) {
+                size_t cur_l = edit_len[cur_row];
+                size_t copy_len = edit_len[cur_row + 1];
+                if (cur_l + copy_len > EDIT_MAX_COLS) {
+                    copy_len = EDIT_MAX_COLS - cur_l;
+                }
+                memcpy(edit_lines[cur_row] + cur_l, edit_lines[cur_row + 1], copy_len);
+                edit_len[cur_row] = cur_l + copy_len;
+                edit_lines[cur_row][edit_len[cur_row]] = '\0';
+                for (size_t r = cur_row + 1; r + 1 < line_count; r++) {
+                    memcpy(edit_lines[r], edit_lines[r + 1], EDIT_MAX_COLS + 1);
+                    edit_len[r] = edit_len[r + 1];
+                }
+                line_count--;
+                dirty = true;
+            }
+        } else if (c >= 32 && c <= 126) {
+            if (edit_len[cur_row] < EDIT_MAX_COLS) {
+                for (size_t i = edit_len[cur_row] + 1; i > cur_col; i--) {
+                    edit_lines[cur_row][i] = edit_lines[cur_row][i - 1];
+                }
+                edit_lines[cur_row][cur_col] = c;
+                cur_col++;
+                edit_len[cur_row]++;
+                dirty = true;
+            }
+        } else {
+            continue;
+        }
+        if (cur_row < scroll_top) {
+            scroll_top = cur_row;
+        } else if (cur_row >= scroll_top + EDIT_VIEW_ROWS) {
+            scroll_top = cur_row - EDIT_VIEW_ROWS + 1;
+        }
+        needs_redraw = true;
+    }
+    sys_clear_screen();
+    return 0;
+}
+
 int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
     (void)stdin_buf;
     size_t off = 0;
@@ -1208,6 +1512,10 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
                 "  -i  Case-insensitive match\n"
                 "  -v  Invert match\n"
                 "  -n  Show line numbers\n");
+        }else if (strcmp(cmd, "touch") == 0) {
+            buf_append(stdout_buf, &off, max_out, "Usage: touch <path> [...]\n  Create an empty file if it does not exist.\n");
+        } else if (strcmp(cmd, "edit") == 0) {
+            buf_append(stdout_buf, &off, max_out, "Usage: edit <path>\n  Open a simple text editor (Ctrl+S save, Ctrl+Q/ESC quit).\n"); 
         } else if (strcmp(cmd, "ps") == 0) {
             buf_append(stdout_buf, &off, max_out, "Usage: ps\n  List active processes with PID, state, and name.\n");
         } else if (strcmp(cmd, "kill") == 0) {
@@ -1242,7 +1550,9 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
         "  kill <pid>               Terminate process by PID\n"
         "  help [command]           Show this help or command details\n"
         "  exit                     Shutdown and exit OSkm\n"
-        "Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n");
+        "  Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n"
+        "  touch <path>             Create empty file\n"
+        "  edit <path>              Open simple text editor\n");
     return 0;
 }
 
@@ -1270,6 +1580,8 @@ static const struct command_entry COMMAND_TABLE[] = {
     {"kill",  kill_cmd},
     {"help", help_cmd},
     {"exit", exit_cmd},
+    {"touch", touch_cmd},
+    {"edit",  edit_cmd},
     {NULL,    NULL}
 };
 
@@ -1435,6 +1747,7 @@ int main(void) {
     char input_line[MAX_LINE_LEN];
 
     while (true) {
+        sys_print("\n", PROMPT_COLOR);
         sys_print("user@os:", PROMPT_COLOR);
         sys_print(current_directory_path, DIR_COLOR);
         sys_print("$ ", PROMPT_COLOR);
