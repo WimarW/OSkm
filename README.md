@@ -105,24 +105,33 @@ Hello World!
 
 ## Bad Apple (opsional)
 
-Pemutar animasi ASCII yang berjalan sebagai program user. Fitur ini sepenuhnya opsional: `make run` biasa tidak membutuhkannya dan tetap berjalan tanpa data Bad Apple.
+Pemutar animasi ASCII yang berjalan sebagai program user. Fitur ini sepenuhnya opsional: `make run` biasa tetap berjalan normal tanpa data Bad Apple.
 
-Videonya tidak disertakan di repository, jadi kamu perlu menyediakan sendiri, ditambah `ffmpeg` dan Python dengan Pillow (di macOS: `python3 -m venv .venv`, `source .venv/bin/activate`, lalu `python3 -m pip install pillow`).
+Videonya tidak disertakan di repository, jadi kamu perlu menyediakan sendiri, ditambah `ffmpeg` dan Python dengan Pillow (di Linux/WSL: `sudo apt install ffmpeg`; di macOS: `python3 -m venv .venv`, `source .venv/bin/activate`, lalu `python3 -m pip install pillow` — `Makefile` otomatis memakai `.venv/bin/python3` jika tersedia).
 
 Resolusi efektif 80x50: satu sel layar menampilkan dua piksel bertumpuk memakai karakter setengah blok.
 
-```
-python3 tools/video2frames.py <video> 10 bin/badapple.bin 30
-make run-badapple
+```bash
+# Pertama kali: otomatis mengonversi video ke bin/badapple.bin, memasang, lalu menjalankan QEMU
+make run BADAPPLE_VIDEO=path/to/badapple.mp4
+
+# Jalankan berikutnya: otomatis memakai bin/badapple.bin yang sudah ada
+make run
 ```
 
-Lalu di shell: `exec badapple`.
+Lalu di shell, jalankan `exec badapple`. Tekan `ESC` atau `Ctrl+C` kapan saja untuk menghentikan animasi lebih awal.
 
-- Argumen `10` adalah fps dan `30` adalah durasi dalam detik.
-- `make run-badapple` berhenti dengan pesan error kalau `bin/badapple.bin` belum dibuat.
+- FPS dan durasi bisa diatur lewat variabel Make (default `BADAPPLE_FPS=10`, `BADAPPLE_SEC=30`):
+  ```bash
+  make run BADAPPLE_VIDEO=path/to/badapple.mp4 BADAPPLE_FPS=10 BADAPPLE_SEC=30
+  ```
+- Untuk melihat preview hasil konversi langsung di terminal sebelum masuk ke OS:
+  ```bash
+  make preview-badapple BADAPPLE_VIDEO=path/to/badapple.mp4
+  ```
+- `make run-badapple` juga tersedia jika ingin memaksa build dengan Bad Apple (berhenti dengan pesan error kalau `bin/badapple.bin` belum ada dan `BADAPPLE_VIDEO` tidak diberikan).
 - Data disimpan 1 bit per piksel (500 byte per frame), jadi ukurannya `8 + 500 x fps x detik` byte. `DATA_MAX` di `src/badapple.c` harus sama atau lebih besar dari itu.
-- `make clean` menghapus `bin/badapple.bin`, jadi buat ulang dengan perintah pertama.
-- `tools/preview.py` memutar hasil konversi di terminal untuk memeriksanya sebelum dimasukkan ke OS.
+- `make clean` menghapus semua `bin/*.bin` termasuk `bin/badapple.bin`, jadi jalankan lagi dengan `BADAPPLE_VIDEO=...` setelah `make clean`.
 
 ## System Call
 

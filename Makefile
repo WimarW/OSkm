@@ -7,6 +7,12 @@ OS := $(shell uname -s)
 # CC            = gcc
 # ISO           = genisoimage
 
+# Bad Apple settings (optional)
+BADAPPLE_VIDEO ?=
+BADAPPLE_FPS   ?= 10
+BADAPPLE_SEC   ?= 30
+PYTHON         := $(if $(wildcard .venv/bin/python3),.venv/bin/python3,python3)
+
 # Directory
 SOURCE_FOLDER = src
 OUTPUT_FOLDER = bin
@@ -56,7 +62,9 @@ disk:
 	@qemu-img create -f raw $(OUTPUT_FOLDER)/$(DISK_NAME).bin 4M
 
 install-apps: disk insert-shell insert-clock insert-hello
-
+	@if [ -f $(OUTPUT_FOLDER)/badapple.bin ] || [ -n "$(BADAPPLE_VIDEO)" ]; then \
+		$(MAKE) insert-badapple BADAPPLE_VIDEO="$(BADAPPLE_VIDEO)" BADAPPLE_FPS=$(BADAPPLE_FPS) BADAPPLE_SEC=$(BADAPPLE_SEC); \
+	fi
 inserter:
 	@mkdir -p $(OUTPUT_FOLDER)
 	@$(CC) $(INSERTER_FLAGS) -I$(SOURCE_FOLDER) \
@@ -146,11 +154,18 @@ user-hello:
 	@ls -l $(OUTPUT_FOLDER)/hello
 	@rm -f *.o
 
-insert-badapple: inserter user-badapple
+$(OUTPUT_FOLDER)/badapple.bin:
+	@if [ -z "$(BADAPPLE_VIDEO)" ]; then \
+		echo "Error: $(OUTPUT_FOLDER)/badapple.bin not found."; \
+		echo "Run: make run-badapple BADAPPLE_VIDEO=path/to/video.mp4"; \
+		exit 1; \
+	fi
+	@mkdir -p $(OUTPUT_FOLDER)
+	@$(PYTHON) tools/video2frames.py "$(BADAPPLE_VIDEO)" $(BADAPPLE_FPS) $@ $(BADAPPLE_SEC)
+insert-badapple: inserter user-badapple $(OUTPUT_FOLDER)/badapple.bin
 	@echo Inserting badapple and its data into root directory...
 	@cd $(OUTPUT_FOLDER); ./inserter badapple 1 $(DISK_NAME).bin
 	@cd $(OUTPUT_FOLDER); ./inserter badapple.bin 1 $(DISK_NAME).bin
-
 user-badapple:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
 	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/badapple.c -o badapple.o
@@ -160,6 +175,7 @@ user-badapple:
 		crt0.o badapple.o string.o -o $(OUTPUT_FOLDER)/badapple
 	@ls -l $(OUTPUT_FOLDER)/badapple
 	@rm -f *.o
-
-run-badapple: build install-apps insert-badapple $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
+preview-badapple: $(OUTPUT_FOLDER)/badapple.bin
+	@$(PYTHON) tools/preview.py $(OUTPUT_FOLDER)/badapple.bin
+run-badapple: build install-apps $(OUTPUT_FOLDER)/badapple.bin $(OUTPUT_FOLDER)/$(SWAP_NAME).bin
 	qemu-system-i386 -rtc base=localtime -drive file=$(OUTPUT_FOLDER)/$(DISK_NAME).bin,format=raw,if=ide,index=0,media=disk -drive file=$(OUTPUT_FOLDER)/$(SWAP_NAME).bin,format=raw,if=ide,index=1,media=disk -cdrom $(OUTPUT_FOLDER)/$(ISO_NAME).iso
