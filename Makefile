@@ -58,10 +58,17 @@ build: iso
 clean:
 	rm -rf $(OUTPUT_FOLDER)/*.o $(OUTPUT_FOLDER)/*.iso $(OUTPUT_FOLDER)/kernel $(OUTPUT_FOLDER)/*.bin
 
-disk:
-	@qemu-img create -f raw $(OUTPUT_FOLDER)/$(DISK_NAME).bin 4M
+$(OUTPUT_FOLDER)/$(DISK_NAME).bin:
+	@mkdir -p $(OUTPUT_FOLDER)
+	@qemu-img create -f raw $@ 4M
 
-install-apps: disk insert-shell insert-clock insert-hello
+disk: $(OUTPUT_FOLDER)/$(DISK_NAME).bin
+
+reset-disk:
+	@rm -f $(OUTPUT_FOLDER)/$(DISK_NAME).bin
+	@$(MAKE) $(OUTPUT_FOLDER)/$(DISK_NAME).bin
+
+install-apps: $(OUTPUT_FOLDER)/$(DISK_NAME).bin insert-shell insert-clock insert-hello
 	@if [ -f $(OUTPUT_FOLDER)/badapple.bin ] || [ -n "$(BADAPPLE_VIDEO)" ]; then \
 		$(MAKE) insert-badapple BADAPPLE_VIDEO="$(BADAPPLE_VIDEO)" BADAPPLE_FPS=$(BADAPPLE_FPS) BADAPPLE_SEC=$(BADAPPLE_SEC); \
 	fi
@@ -76,7 +83,7 @@ inserter:
 
 insert-shell: inserter user-shell
 	@echo Inserting shell into root directory...
-	@cd $(OUTPUT_FOLDER); ./inserter shell 1 $(DISK_NAME).bin
+	@cd $(OUTPUT_FOLDER); ./inserter -f shell 1 $(DISK_NAME).bin
 
 $(OUTPUT_FOLDER)/$(SWAP_NAME).bin:
 	@mkdir -p $(OUTPUT_FOLDER)
@@ -130,7 +137,7 @@ user-shell:
 
 insert-clock: inserter user-clock
 	@echo Inserting clock into root directory...
-	@cd $(OUTPUT_FOLDER); ./inserter clock 1 $(DISK_NAME).bin
+	@cd $(OUTPUT_FOLDER); ./inserter -f clock 1 $(DISK_NAME).bin
 
 user-clock:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
@@ -143,7 +150,7 @@ user-clock:
 
 insert-hello: inserter user-hello
 	@echo Inserting hello into root directory...
-	@cd $(OUTPUT_FOLDER); ./inserter hello 1 $(DISK_NAME).bin
+	@cd $(OUTPUT_FOLDER); ./inserter -f hello 1 $(DISK_NAME).bin
 
 user-hello:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
@@ -164,8 +171,8 @@ $(OUTPUT_FOLDER)/badapple.bin:
 	@$(PYTHON) tools/video2frames.py "$(BADAPPLE_VIDEO)" $(BADAPPLE_FPS) $@ $(BADAPPLE_SEC)
 insert-badapple: inserter user-badapple $(OUTPUT_FOLDER)/badapple.bin
 	@echo Inserting badapple and its data into root directory...
-	@cd $(OUTPUT_FOLDER); ./inserter badapple 1 $(DISK_NAME).bin
-	@cd $(OUTPUT_FOLDER); ./inserter badapple.bin 1 $(DISK_NAME).bin
+	@cd $(OUTPUT_FOLDER); ./inserter -f badapple 1 $(DISK_NAME).bin
+	@cd $(OUTPUT_FOLDER); ./inserter -f badapple.bin 1 $(DISK_NAME).bin
 user-badapple:
 	@$(ASM) $(AFLAGS) $(SOURCE_FOLDER)/crt0.s -o crt0.o
 	@$(CC)  $(CFLAGS) -fno-pie $(SOURCE_FOLDER)/badapple.c -o badapple.o
