@@ -13,6 +13,7 @@
 #include "header/memory/swap.h"
 #include "header/process/process.h"
 #include "header/process/scheduler.h"
+#include "header/text/loadscreen.h"
 
 
 void kernel_setup(void) {
@@ -21,17 +22,20 @@ void kernel_setup(void) {
     initialize_idt();
     activate_keyboard_interrupt();
     framebuffer_clear();
-    framebuffer_set_cursor(0, 0);
-    // keyboard_state_activate();
-    // keyboard_configuration();
+
+    splash_hide_cursor();
+    splash_draw_nairo();
+    splash_draw_progress(20, "Initializing interrupts...");
+    splash_delay(150000000);
+
     initialize_filesystem_ext2();
+    splash_draw_progress(50, "Mounted EXT2 filesystem");
+    splash_delay(150000000);
+
     gdt_install_tss();
     set_tss_register();
-
-    // Allocate first 4 MiB virtual memory
-    // for (uint32_t addr = 0; addr < 0x400000; addr += PAGE_FRAME_SIZE) {
-    //     paging_allocate_user_page_frame(&_paging_kernel_page_directory, (uint8_t*) addr);
-    // }
+    splash_draw_progress(75, "Configured TSS & memory");
+    splash_delay(150000000);
 
     // Write shell into memory
     struct EXT2DriverRequest request = {
@@ -45,6 +49,11 @@ void kernel_setup(void) {
     // Set the kernel interrupt stack before starting the first user process.
     set_tss_kernel_current_stack();
     if (process_create_user_process(request) == PROCESS_CREATE_SUCCESS) {
+        splash_draw_progress(100, "Starting NAIRO shell...");
+        splash_delay(300000000);
+        framebuffer_clear();
+        framebuffer_set_cursor(0, 0);
+        
         __asm__ volatile("cli" : : : "memory");
         scheduler_init();
         scheduler_switch_to_next_process();
