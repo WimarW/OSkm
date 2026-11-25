@@ -25,7 +25,7 @@ static void sys_get_time(struct CMOSTime *t) {
 }
 
 static void sys_putc_at(uint32_t row, uint32_t col, char c, uint32_t color) {
-    syscall(10, (row << 16) | col, (uint32_t)(uint8_t)c, color);
+    syscall(14, (row << 16) | col, (uint32_t)(uint8_t)c, color);
 }
 
 int main(void) {

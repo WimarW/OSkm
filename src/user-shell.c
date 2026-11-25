@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "header/filesystem/ext2.h"
+#include "header/process/process.h"
 #include "header/stdlib/string.h"
 
 #define BLOCK_COUNT 16
@@ -111,39 +112,6 @@ void sys_clear_screen(void) {
     syscall(8, 0, 0, 0);
 }
 
-int32_t sys_exec(const char *name) {
-    int32_t ret = -1;
-    syscall(11, (uint32_t)name, (uint32_t)&ret, 0);
-    return ret;
-}
-
-struct ProcessInfo {
-    uint32_t pid;
-    uint32_t state;
-    char     name[32];
-};
-
-uint32_t sys_ps(struct ProcessInfo *list) {
-    uint32_t count = 0;
-    syscall(13, (uint32_t)list, (uint32_t)&count, 0);
-    return count;
-}
-
-int32_t sys_kill(uint32_t pid) {
-    int32_t ret = -1;
-    syscall(12, pid, (uint32_t)&ret, 0);
-    return ret;
-}
-
-static void u32_to_str(uint32_t v, char *out) {
-    char tmp[11];
-    int n = 0;
-    if (v == 0) tmp[n++] = '0';
-    while (v > 0) { tmp[n++] = (char)('0' + v % 10); v /= 10; }
-    for (int i = 0; i < n; i++) out[i] = tmp[n - 1 - i];
-    out[n] = '\0';
-}
-
 int8_t fs_read(uint32_t parent_inode, char *name, void *buf, uint32_t size){
     int8_t retcode = -1;
     struct EXT2DriverRequest request = {
@@ -212,6 +180,32 @@ int8_t fs_delete(uint32_t parent_inode, char *name, bool is_dir){
     };
     syscall(3, (uint32_t)&request, (uint32_t)&retcode, 0);
     return retcode;
+}
+
+bool sys_kill(uint32_t pid) {
+    bool result = false;
+    syscall(12, pid, (uint32_t)&result, 0);
+    return result;
+}
+
+int32_t sys_exec(uint32_t parent_inode, char *name) {
+    int32_t retcode = -1;
+    struct EXT2DriverRequest request = {
+        .buf          = (uint8_t*) 0,
+        .name         = name,
+        .name_len     = (uint8_t)strlen(name),
+        .parent_inode = parent_inode,
+        .buffer_size  = 0x100000,
+        .is_directory = false
+    };
+    syscall(11, (uint32_t)&request, (uint32_t)&retcode, 0);
+    return retcode;
+}
+
+uint32_t sys_get_process_info(struct ProcessInfo *list, uint32_t max_count) {
+    uint32_t count = 0;
+    syscall(13, (uint32_t)list, max_count, (uint32_t)&count);
+    return count;
 }
 
 
@@ -1026,6 +1020,146 @@ int grep_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
     return 0;
 }
 
+static bool parse_uint32(const char *str, uint32_t *out) {
+    if (str == NULL || *str == '\0') return false;
+    uint32_t val = 0;
+    for (const char *p = str; *p; p++) {
+        if (*p < '0' || *p > '9') return false;
+        uint32_t digit = (uint32_t)(*p - '0');
+        if (val > (0xFFFFFFFFu - digit) / 10u) return false;
+        val = val * 10u + digit;
+    }
+    *out = val;
+    return true;
+}
+
+static void buf_append_padded(char *buf, size_t *offset, size_t max, const char *str, size_t width) {
+    size_t slen = strlen(str);
+    buf_append(buf, offset, max, str);
+    while (slen < width) {
+        buf_append(buf, offset, max, " ");
+        slen++;
+    }
+}
+
+static const char *process_state_to_str(PROCESS_STATE state) {
+    switch (state) {
+        case PROCESS_STATE_RUNNING: return "RUNNING";
+        case PROCESS_STATE_READY:   return "READY";
+        default:                    return "INACTIVE";
+    }
+}
+
+int ps_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)argc;
+    (void)argv;
+    (void)stdin_buf;
+    size_t off = 0;
+
+    struct ProcessInfo list[PROCESS_COUNT_MAX];
+    uint32_t count = sys_get_process_info(list, PROCESS_COUNT_MAX);
+
+    buf_append(stdout_buf, &off, max_out, "PID     STATE     NAME\n");
+    for (uint32_t i = 0; i < count; i++) {
+        size_t before = off;
+        buf_append_uint(stdout_buf, &off, max_out, list[i].pid);
+        size_t pid_len = off - before;
+        while (pid_len < 8) {
+            buf_append(stdout_buf, &off, max_out, " ");
+            pid_len++;
+        }
+        buf_append_padded(stdout_buf, &off, max_out, process_state_to_str(list[i].state), 10);
+        buf_append(stdout_buf, &off, max_out, list[i].process_name);
+        buf_append(stdout_buf, &off, max_out, "\n");
+    }
+    return 0;
+}
+
+int kill_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)stdin_buf;
+    size_t off = 0;
+
+    if (argc < 2) {
+        buf_append(stdout_buf, &off, max_out, "kill: missing PID operand (kill <pid>)\n");
+        return -1;
+    }
+
+    uint32_t pid = 0;
+    if (!parse_uint32(argv[1], &pid) || pid == 0) {
+        buf_append(stdout_buf, &off, max_out, "kill: invalid PID: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+
+    if (!sys_kill(pid)) {
+        buf_append(stdout_buf, &off, max_out, "kill: process not found: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+
+    buf_append(stdout_buf, &off, max_out, "Process ");
+    buf_append(stdout_buf, &off, max_out, argv[1]);
+    buf_append(stdout_buf, &off, max_out, " terminated\n");
+    return 0;
+}
+
+int exec_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
+    (void)stdin_buf;
+    size_t off = 0;
+
+    if (argc < 2) {
+        buf_append(stdout_buf, &off, max_out, "exec: missing program operand (exec <path>)\n");
+        return -1;
+    }
+
+    uint32_t parent_inode = 0;
+    char name[MAX_PATH_LEN];
+    bool had_slash = false;
+    if (!resolve_parent(argv[1], &parent_inode, name, sizeof(name), &had_slash) ||
+        had_slash || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        buf_append(stdout_buf, &off, max_out, "exec: invalid executable path: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+
+    uint32_t target_inode = 0;
+    uint8_t file_type = 0;
+    if (!lookup_entry(parent_inode, name, &target_inode, &file_type)) {
+        buf_append(stdout_buf, &off, max_out, "exec: program not found: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+    if (file_type == EXT2_FT_DIR) {
+        buf_append(stdout_buf, &off, max_out, "exec: cannot execute directory: ");
+        buf_append(stdout_buf, &off, max_out, argv[1]);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return -1;
+    }
+
+    int32_t ret = sys_exec(parent_inode, name);
+    if (ret == PROCESS_CREATE_SUCCESS) {
+        buf_append(stdout_buf, &off, max_out, "Started process: ");
+        buf_append(stdout_buf, &off, max_out, name);
+        buf_append(stdout_buf, &off, max_out, "\n");
+        return 0;
+    } else if (ret == PROCESS_CREATE_FAIL_MAX_PROCESS_EXCEEDED) {
+        buf_append(stdout_buf, &off, max_out, "exec: maximum process limit reached\n");
+    } else if (ret == PROCESS_CREATE_FAIL_INVALID_ENTRYPOINT) {
+        buf_append(stdout_buf, &off, max_out, "exec: invalid executable entrypoint\n");
+    } else if (ret == PROCESS_CREATE_FAIL_NOT_ENOUGH_MEMORY) {
+        buf_append(stdout_buf, &off, max_out, "exec: not enough memory\n");
+    } else if (ret == PROCESS_CREATE_FAIL_FS_READ_FAILURE) {
+        buf_append(stdout_buf, &off, max_out, "exec: failed to read executable\n");
+    } else {
+        buf_append(stdout_buf, &off, max_out, "exec: failed to start process\n");
+    }
+    return -1;
+}
+
 int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
     (void)stdin_buf;
     size_t off = 0;
@@ -1058,6 +1192,12 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
                 "  -i  Case-insensitive match\n"
                 "  -v  Invert match\n"
                 "  -n  Show line numbers\n");
+        } else if (strcmp(cmd, "exec") == 0) {
+            buf_append(stdout_buf, &off, max_out, "Usage: exec <path>\n  Load and start an executable program as a new process.\n");
+        } else if (strcmp(cmd, "ps") == 0) {
+            buf_append(stdout_buf, &off, max_out, "Usage: ps\n  List active processes with PID, state, and name.\n");
+        } else if (strcmp(cmd, "kill") == 0) {
+            buf_append(stdout_buf, &off, max_out, "Usage: kill <pid>\n  Terminate a running process by PID.\n");
         } else if (strcmp(cmd, "help") == 0) {
             buf_append(stdout_buf, &off, max_out, "Usage: help [command]\n  Show available commands or details for one command.\n");
         } else {
@@ -1081,72 +1221,11 @@ int help_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, si
         "  mv <src> <dst>           Move or rename file\n"
         "  find <name>[/]           Find file or directory from /\n"
         "  grep [-Eivn] <pat> [f]   Search lines (supports RegEx & pipes)\n"
+        "  exec <path>              Run executable program as new process\n"
+        "  ps                       List active processes\n"
+        "  kill <pid>               Terminate process by PID\n"
         "  help [command]           Show this help or command details\n"
         "Pipelines: cmd1 | cmd2     Quote patterns containing | or spaces.\n");
-    return 0;
-}
-
-int exec_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
-    (void)stdin_buf;
-    size_t off = 0;
-
-    if (argc < 2) {
-        buf_append(stdout_buf, &off, max_out, "exec: usage: exec <program>\n");
-        return -1;
-    }
-
-    int32_t ret = sys_exec(argv[1]);
-    if (ret != 0) {
-        buf_append(stdout_buf, &off, max_out, "exec: failed to run ");
-        buf_append(stdout_buf, &off, max_out, argv[1]);
-        buf_append(stdout_buf, &off, max_out, "\n");
-        return -1;
-    }
-
-    buf_append(stdout_buf, &off, max_out, argv[1]);
-    buf_append(stdout_buf, &off, max_out, " running..\n");
-    return 0;
-}
-
-int ps_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
-    (void)argc; (void)argv; (void)stdin_buf;
-    size_t off = 0;
-    struct ProcessInfo list[16];
-    uint32_t count = sys_ps(list);
-
-    buf_append(stdout_buf, &off, max_out, "PID  NAME\n");
-    for (uint32_t i = 0; i < count; i++) {
-        char num[12];
-        u32_to_str(list[i].pid, num);
-        buf_append(stdout_buf, &off, max_out, num);
-        buf_append(stdout_buf, &off, max_out, "    ");
-        buf_append(stdout_buf, &off, max_out, list[i].name);
-        buf_append(stdout_buf, &off, max_out, "\n");
-    }
-    return 0;
-}
-
-int kill_cmd(int argc, char *argv[], const char *stdin_buf, char *stdout_buf, size_t max_out) {
-    (void)stdin_buf;
-    size_t off = 0;
-
-    if (argc < 2) {
-        buf_append(stdout_buf, &off, max_out, "kill: usage: kill <pid>\n");
-        return -1;
-    }
-    uint32_t pid = 0;
-    for (const char *p = argv[1]; *p; p++) {
-        if (*p < '0' || *p > '9') {
-            buf_append(stdout_buf, &off, max_out, "kill: invalid pid\n");
-            return -1;
-        }
-        pid = pid * 10 + (uint32_t)(*p - '0');
-    }
-    if (sys_kill(pid) != 0) {
-        buf_append(stdout_buf, &off, max_out, "kill: failed\n");
-        return -1;
-    }
-    buf_append(stdout_buf, &off, max_out, "process killed\n");
     return 0;
 }
 
@@ -1169,10 +1248,10 @@ static const struct command_entry COMMAND_TABLE[] = {
     {"mv",    mv_cmd},
     {"find",  find_cmd},
     {"grep",  grep_cmd},
+    {"exec",  exec_cmd},
+    {"ps",    ps_cmd},
+    {"kill",  kill_cmd},
     {"help", help_cmd},
-    {"exec", exec_cmd},
-    {"ps",   ps_cmd},
-    {"kill", kill_cmd},
     {NULL,    NULL}
 };
 

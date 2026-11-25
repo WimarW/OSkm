@@ -96,7 +96,50 @@ void syscall(struct InterruptFrame frame) {
         case 9:
             cmos_read_time((struct CMOSTime*) frame.cpu.general.ebx);
             break;
-        case 10:
+        case 10: {
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            if (running != NULL) {
+                process_destroy(running->metadata.pid);
+            }
+            scheduler_switch_to_next_process();
+            break;
+        }
+        case 11: {
+            int32_t ret = PROCESS_CREATE_FAIL_INVALID_ENTRYPOINT;
+            if (frame.cpu.general.ebx != 0) {
+                ret = process_create_user_process(
+                    *(struct EXT2DriverRequest*) frame.cpu.general.ebx
+                );
+            }
+            if (frame.cpu.general.ecx != 0) {
+                *((int32_t*) frame.cpu.general.ecx) = ret;
+            }
+            break;
+        }
+        case 12: {
+            uint32_t target_pid = frame.cpu.general.ebx;
+            struct ProcessControlBlock *running = process_get_current_running_pcb_pointer();
+            bool is_self = (running != NULL && running->metadata.pid == target_pid);
+            bool destroyed = process_destroy(target_pid);
+            if (is_self && destroyed) {
+                scheduler_switch_to_next_process();
+            }
+            if (frame.cpu.general.ecx != 0) {
+                *((bool*) frame.cpu.general.ecx) = destroyed;
+            }
+            break;
+        }
+        case 13: {
+            uint32_t count = process_get_active_list(
+                (struct ProcessInfo*) frame.cpu.general.ebx,
+                frame.cpu.general.ecx
+            );
+            if (frame.cpu.general.edx != 0) {
+                *((uint32_t*) frame.cpu.general.edx) = count;
+            }
+            break;
+        }
+        case 14:
             framebuffer_write(
                 (frame.cpu.general.ebx >> 16) & 0xFFFF,
                 frame.cpu.general.ebx & 0xFFFF,
@@ -105,58 +148,6 @@ void syscall(struct InterruptFrame frame) {
                 0
             );
             break;
-        case 11: {
-            char name[PROCESS_NAME_LENGTH_MAX];
-            const char *user_name = (const char*) frame.cpu.general.ebx;
-            uint8_t len = 0;
-            while (len < PROCESS_NAME_LENGTH_MAX - 1 && user_name[len] != '\0') {
-                name[len] = user_name[len];
-                len++;
-            }
-            name[len] = '\0';
-
-            struct EXT2DriverRequest request = {
-                .buf          = (uint8_t*) 0,
-                .name         = name,
-                .name_len     = len,
-                .parent_inode = 1,
-                .buffer_size  = 0x100000,
-                .is_directory = false,
-            };
-            *((int32_t*) frame.cpu.general.ecx) = process_create_user_process(request);
-            break;
-        }
-        case 12: {
-            uint32_t pid = frame.cpu.general.ebx;
-            struct ProcessControlBlock *cur = process_get_current_running_pcb_pointer();
-            int32_t result = -1;
-            if (cur != NULL && cur->metadata.pid != pid) {
-                result = process_destroy(pid) ? 0 : -1;
-            }
-            *((int32_t*) frame.cpu.general.ecx) = result;
-            break;
-        }
-        case 13: {
-            struct ProcessInfo *out = (struct ProcessInfo*) frame.cpu.general.ebx;
-            uint32_t count = 0;
-            for (uint32_t i = 0; i < PROCESS_COUNT_MAX; i++) {
-                if (_process_list[i].metadata.state == PROCESS_STATE_INACTIVE) continue;
-                out[count].pid   = _process_list[i].metadata.pid;
-                out[count].state = (uint32_t) _process_list[i].metadata.state;
-                memcpy(out[count].name, _process_list[i].metadata.process_name, PROCESS_NAME_LENGTH_MAX);
-                count++;
-            }
-            *((uint32_t*) frame.cpu.general.ecx) = count;
-            break;
-        }
-        case 14: {
-            struct ProcessControlBlock *cur = process_get_current_running_pcb_pointer();
-            if (cur != NULL) {
-                process_destroy(cur->metadata.pid);
-            }
-            scheduler_switch_to_next_process();
-            break;
-        }
     }
 }
 

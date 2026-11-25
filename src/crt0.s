@@ -4,9 +4,7 @@ extern main
 section .text
 _start:
     call main
-    mov eax, 14
-    xor ebx, ebx
-    xor ecx, ecx
-    xor edx, edx
+    mov ebx, eax
+    mov eax, 10 ; Assuming syscall exit is 10
     int 0x30
     jmp $
